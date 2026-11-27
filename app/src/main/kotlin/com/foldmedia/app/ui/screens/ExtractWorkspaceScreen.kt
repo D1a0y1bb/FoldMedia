@@ -1231,37 +1231,19 @@ private fun QuickWorkflowHintCard(modifier: Modifier = Modifier) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(14.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = "快捷导入方式",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp
-                )
-                Text(
-                    text = "在抖音、小红书、微信（公众号/表情专辑）、X 或 YouTube 内点击「分享 -> 叠影提取」，或直接复制链接后回到本页即可自动识别。",
-                    fontSize = 12.sp,
-                    lineHeight = 18.sp,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary
-                )
-            }
-            Spacer(modifier = Modifier.height(10.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MiuixTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f))
-                    .padding(horizontal = 10.dp, vertical = 7.dp)
-            ) {
-                Text(
-                    text = "纯本地解析与音视频合成 · 不经过任何第三方中转服务器",
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary
-                )
-            }
+            Text(
+                text = "快捷导入方式",
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 14.sp
+            )
+            Text(
+                text = "在抖音、小红书、微信（公众号/表情专辑）、X 或 YouTube 内点击「分享 -> 叠影提取」，或直接复制链接后回到本页即可自动识别。",
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+            )
         }
     }
 }
