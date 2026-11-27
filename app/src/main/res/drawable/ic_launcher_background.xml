@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Deep HyperOS Aurora Blue Gradient -->
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endX="102"
+                android:endY="106"
+                android:startX="8"
+                android:startY="4"
+                android:type="linear">
+                <item
+                    android:color="#FF2997FF"
+                    android:offset="0.0" />
+                <item
+                    android:color="#FF0D6EFD"
+                    android:offset="0.48" />
+                <item
+                    android:color="#FF1E2B8F"
+                    android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Soft Luminous Liquid Glow Top-Left -->
+    <path android:pathData="M54,54m-54,0a54,54 0,1 1,108 0a54,54 0,1 1,-108 0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="32"
+                android:centerY="26"
+                android:gradientRadius="68"
+                android:type="radial">
+                <item
+                    android:color="#557CE8FF"
+                    android:offset="0.0" />
+                <item
+                    android:color="#000D84FF"
+                    android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Warm Accent Glow Bottom-Right -->
+    <path android:pathData="M54,54m-54,0a54,54 0,1 1,108 0a54,54 0,1 1,-108 0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="84"
+                android:centerY="84"
+                android:gradientRadius="46"
+                android:type="radial">
+                <item
+                    android:color="#339B5CFF"
+                    android:offset="0.0" />
+                <item
+                    android:color="#001E2B8F"
+                    android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

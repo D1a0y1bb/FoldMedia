@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Subtle Drop Shadow Under Folded Panels -->
+    <path
+        android:fillColor="#26081442"
+        android:pathData="M31,36 C31,32.686 33.686,30 37,30 L73,30 C76.314,30 79,32.686 79,36 L79,76 C79,79.314 76.314,82 73,82 L37,82 C33.686,82 31,79.314 31,76 Z" />
+
+    <!-- Back Fold Layer ("叠") — Translucent Frosted Glass Sheet -->
+    <path
+        android:pathData="M35,28 C35,24.686 37.686,22 41,22 L73,22 C76.314,22 79,24.686 79,28 L79,68 C79,71.314 76.314,74 73,74 L41,74 C37.686,74 35,71.314 35,68 Z"
+        android:strokeWidth="1.2"
+        android:strokeColor="#66FFFFFF">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endX="79"
+                android:endY="74"
+                android:startX="35"
+                android:startY="22"
+                android:type="linear">
+                <item
+                    android:color="#77FFFFFF"
+                    android:offset="0.0" />
+                <item
+                    android:color="#33D9EEFF"
+                    android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Front Fold Layer ("影") — Crisp Frosted White Card -->
+    <path
+        android:pathData="M27,36 C27,32.686 29.686,30 33,30 L67,30 C70.314,30 73,32.686 73,36 L73,76 C73,79.314 70.314,82 67,82 L33,82 C29.686,82 27,79.314 27,76 Z"
+        android:strokeWidth="1.4"
+        android:strokeColor="#AAFFFFFF">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endX="73"
+                android:endY="82"
+                android:startX="27"
+                android:startY="30"
+                android:type="linear">
+                <item
+                    android:color="#F7FFFFFF"
+                    android:offset="0.0" />
+                <item
+                    android:color="#DDE8F4FF"
+                    android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Center Motion-Photo / Media Extraction Ring -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M50,43.5 A12.5,12.5 0 1,1 49.99,43.5 Z"
+        android:strokeWidth="3.2"
+        android:strokeColor="#FF0D84FF" />
+
+    <!-- Dashed Outer Live-Photo Orbit Arc -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M39.5,56 A10.5,10.5 0 0,1 60.5,56"
+        android:strokeLineCap="round"
+        android:strokeWidth="1.6"
+        android:strokeColor="#800D84FF" />
+
+    <!-- Crisp Downward Extract Arrow Inside Aperture -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M50,49 L50,62.5 M44.8,57.8 L50,63.2 L55.2,57.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="3.4"
+        android:strokeColor="#FF0D84FF" />
+
+    <!-- Live Photo Amber Dot Badge on Back Glass Corner -->
+    <path
+        android:fillColor="#FFFF9F1C"
+        android:pathData="M71,30 m-4.2,0 a4.2,4.2 0,1 1,8.4 0 a4.2,4.2 0,1 1,-8.4 0" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M71,30 m-1.6,0 a1.6,1.6 0,1 1,3.2 0 a1.6,1.6 0,1 1,-3.2 0" />
+</vector>
