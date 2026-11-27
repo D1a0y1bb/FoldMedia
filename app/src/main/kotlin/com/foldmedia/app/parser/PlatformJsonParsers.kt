@@ -497,15 +497,17 @@ object PlatformJsonParsers {
 
         val noteDetailMap = root["note"]?.asObjectOrNull()
             ?.get("noteDetailMap")?.asObjectOrNull()
-            ?: throw IllegalStateException("小红书数据中缺少 noteDetailMap（可能需在「引擎与账号」中登录小红书）")
 
-        val noteContainer = noteDetailMap.entries.firstOrNull { (_, value) ->
+        val desktopNote = noteDetailMap?.entries?.firstOrNull { (_, value) ->
             value.asObjectOrNull()?.get("note")?.asObjectOrNull() != null
-        }?.value?.asObjectOrNull()
-            ?: throw IllegalStateException("未能从 noteDetailMap 中定位笔记详情")
+        }?.value?.asObjectOrNull()?.get("note")?.asObjectOrNull()
 
-        val note = noteContainer["note"]?.asObjectOrNull()
-            ?: throw IllegalStateException("笔记对象为空")
+        val mobileNote = root["noteData"]?.asObjectOrNull()
+            ?.get("data")?.asObjectOrNull()
+            ?.get("noteData")?.asObjectOrNull()
+
+        val note = desktopNote ?: mobileNote
+            ?: throw IllegalStateException("小红书数据中缺少笔记详情（可能需在「账号与设置」中登录小红书）")
 
         val noteId = note["noteId"]?.jsonPrimitive?.contentOrNull
             ?: LinkSanitizer.extractXhsNoteId(resolvedUrl)
@@ -587,10 +589,11 @@ object PlatformJsonParsers {
     private fun extractXhsImageUrl(imgObj: JsonObject?): String? {
         if (imgObj == null) return null
         val infoList = imgObj["infoList"]?.asArrayOrNull().orEmpty()
-        // Prefer WB_DFT (default high-res) or first non-blank infoList entry, then urlDefault / urlPre / url
-        val preferredInfo = infoList.mapNotNull { it.asObjectOrNull() }
-            .firstOrNull { it["imageScene"]?.jsonPrimitive?.contentOrNull == "WB_DFT" }
-            ?: infoList.firstOrNull()?.asObjectOrNull()
+        // Prefer WB_DFT (desktop default) or H5_DTL (mobile high-res detail), then first infoList entry
+        val infoObjs = infoList.mapNotNull { it.asObjectOrNull() }
+        val preferredInfo = infoObjs.firstOrNull { it["imageScene"]?.jsonPrimitive?.contentOrNull == "WB_DFT" }
+            ?: infoObjs.firstOrNull { it["imageScene"]?.jsonPrimitive?.contentOrNull == "H5_DTL" }
+            ?: infoObjs.firstOrNull()
         val raw = preferredInfo?.get("url")?.jsonPrimitive?.contentOrNull
             ?: imgObj["urlDefault"]?.jsonPrimitive?.contentOrNull
             ?: imgObj["url"]?.jsonPrimitive?.contentOrNull

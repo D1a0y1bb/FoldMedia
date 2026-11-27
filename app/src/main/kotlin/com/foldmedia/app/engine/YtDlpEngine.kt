@@ -1,6 +1,7 @@
 package com.foldmedia.app.engine
 
 import android.content.Context
+import android.media.MediaMetadataRetriever
 import android.net.ConnectivityManager
 import android.util.Log
 import com.foldmedia.app.model.ExtractedPost
@@ -8,6 +9,7 @@ import com.foldmedia.app.model.MediaItem
 import com.foldmedia.app.model.MediaKind
 import com.foldmedia.app.model.PlatformType
 import com.foldmedia.app.model.QualityOption
+import com.foldmedia.app.model.VideoSubtitleRemoveMode
 import com.foldmedia.app.parser.LinkSanitizer
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
@@ -435,6 +437,117 @@ class YtDlpEngine(private val appContext: Context) {
         return outFile
     }
 
+    /**
+     * Strips soft subtitle tracks or blurs/crops burned-in bottom subtitles locally via bundled `libffmpeg.so`.
+     */
+    suspend fun removeVideoSubtitles(
+        inputFile: File,
+        outputDir: File,
+        mode: VideoSubtitleRemoveMode,
+        onProgress: (Float, String) -> Unit
+    ): File = withContext(Dispatchers.IO) {
+        if (mode == VideoSubtitleRemoveMode.OFF) return@withContext inputFile
+        check(ensureInitialized()) { "本地 FFmpeg 引擎尚未就绪" }
+        val ffmpegBin = File(appContext.applicationInfo.nativeLibraryDir, "libffmpeg.so")
+        check(ffmpegBin.exists()) { "未找到内置 libffmpeg.so" }
+
+        val packagesDir = File(appContext.noBackupFilesDir, "youtubedl-android/packages")
+        val ldPath = listOf(
+            File(packagesDir, "python/usr/lib").absolutePath,
+            File(packagesDir, "ffmpeg/usr/lib").absolutePath
+        ).joinToString(":")
+        val sslCert = File(packagesDir, "python/usr/etc/tls/cert.pem").absolutePath
+
+        val (vw, vh) = probeEffectiveVideoSize(inputFile)
+        val filter = buildSubtitleRemovalFilter(vw, vh, mode)
+        val outFile = File(outputDir, "nosub_${System.currentTimeMillis()}.mp4")
+
+        fun runFfmpegCmd(reencodeAudio: Boolean): Pair<Int, String> {
+            if (outFile.exists()) outFile.delete()
+            val cmd = buildList {
+                add(ffmpegBin.absolutePath)
+                add("-y")
+                add("-loglevel")
+                add("error")
+                add("-i")
+                add(inputFile.absolutePath)
+                if (filter != null) {
+                    add("-vf")
+                    add(filter)
+                    add("-sn")
+                    add("-c:v")
+                    add("libx264")
+                    add("-preset")
+                    add("veryfast")
+                    add("-crf")
+                    add("20")
+                    add("-pix_fmt")
+                    add("yuv420p")
+                    if (reencodeAudio) {
+                        add("-c:a")
+                        add("aac")
+                        add("-b:a")
+                        add("192k")
+                    } else {
+                        add("-c:a")
+                        add("copy")
+                    }
+                } else {
+                    add("-map")
+                    add("0:v")
+                    add("-map")
+                    add("0:a?")
+                    add("-c")
+                    add("copy")
+                    add("-sn")
+                }
+                add("-movflags")
+                add("+faststart")
+                add(outFile.absolutePath)
+            }
+            val pb = ProcessBuilder(cmd).redirectErrorStream(true)
+            pb.environment().apply {
+                put("LD_LIBRARY_PATH", ldPath)
+                put("SSL_CERT_FILE", sslCert)
+            }
+            val process = pb.start()
+            val stderr = process.inputStream.bufferedReader().readText()
+            val code = process.waitFor()
+            return code to stderr
+        }
+
+        onProgress(0.88f, "FFmpeg ${mode.label} 处理中...")
+        var (exitCode, stderr) = runFfmpegCmd(reencodeAudio = false)
+        if ((exitCode != 0 || !outFile.exists() || outFile.length() == 0L) && filter != null) {
+            Log.w("YtDlpEngine", "Subtitle removal failed with audio copy ($exitCode): $stderr; retrying AAC")
+            val retry = runFfmpegCmd(reencodeAudio = true)
+            exitCode = retry.first
+            stderr = retry.second
+        }
+        if (exitCode != 0 || !outFile.exists() || outFile.length() == 0L) {
+            throw IllegalStateException(
+                "FFmpeg 去字幕失败: ${stderr.lineSequence().lastOrNull { it.isNotBlank() } ?: "退出码 $exitCode"}"
+            )
+        }
+        onProgress(0.94f, "去字幕封装完成")
+        outFile
+    }
+
+    private fun probeEffectiveVideoSize(videoFile: File): Pair<Int, Int> {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(videoFile.absolutePath)
+            val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            val rot = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+            if (rot == 90 || rot == 270) h to w else w to h
+        } catch (_: Throwable) {
+            0 to 0
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
     internal fun resolveSystemProxyUrl(): String? {
         runCatching {
             val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
@@ -502,6 +615,37 @@ class YtDlpEngine(private val appContext: Context) {
         private val lenientJson = Json {
             ignoreUnknownKeys = true
             isLenient = true
+        }
+
+        /**
+         * Builds a safe FFmpeg `-vf` expression for bottom hard-subtitle removal.
+         * Ensures coordinates stay strictly within `[1, width/height - 2]` and even crop height.
+         */
+        internal fun buildSubtitleRemovalFilter(
+            width: Int,
+            height: Int,
+            mode: VideoSubtitleRemoveMode
+        ): String? = when (mode) {
+            VideoSubtitleRemoveMode.OFF, VideoSubtitleRemoveMode.SOFT_STRIP -> null
+            VideoSubtitleRemoveMode.DELOGO_BOTTOM -> {
+                if (width < 64 || height < 64) {
+                    null
+                } else {
+                    val x = (width * 0.08).toInt().coerceIn(2, (width - 20).coerceAtLeast(2))
+                    val y = (height * 0.84).toInt().coerceIn(2, (height - 20).coerceAtLeast(2))
+                    val w = (width - 2 * x).coerceIn(16, (width - x - 2).coerceAtLeast(16))
+                    val h = (height - y - 4).coerceIn(16, (height - y - 2).coerceAtLeast(16))
+                    "delogo=x=$x:y=$y:w=$w:h=$h"
+                }
+            }
+            VideoSubtitleRemoveMode.CROP_BOTTOM -> {
+                if (height < 64) {
+                    null
+                } else {
+                    val cropH = (((height * 0.86).toInt() / 2) * 2).coerceIn(32, height)
+                    "crop=iw:$cropH:0:0"
+                }
+            }
         }
     }
 }

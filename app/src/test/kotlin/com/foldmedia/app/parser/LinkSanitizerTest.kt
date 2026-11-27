@@ -102,4 +102,20 @@ class LinkSanitizerTest {
         assertTrue(token.isNotBlank())
         assertTrue(token.all { it.isLetterOrDigit() })
     }
+
+    @Test
+    fun detectsXhslinkCnAndUnwrapsXhsLoginRedirect() {
+        val shortUrl = "https://xhslink.cn/o/5FmFyZt7HDO"
+        assertEquals(PlatformType.XIAOHONGSHU, LinkSanitizer.detectPlatform(shortUrl))
+        assertTrue(LinkSanitizer.isShortRedirectUrl(shortUrl))
+
+        val wrappedLogin =
+            "https://www.xiaohongshu.com/login?redirectPath=http%3A%2F%2Fwww.xiaohongshu.com%2Fdiscovery%2Fitem%2F6b01911b000000002a038edc%3Fxsec_token%3DCBMxp%253D%26xsec_source%3Dapp_share&exSource=null"
+        val unwrapped = LinkSanitizer.unwrapXiaohongshuLoginRedirect(wrappedLogin)
+        assertEquals(
+            "https://www.xiaohongshu.com/discovery/item/6b01911b000000002a038edc?xsec_token=CBMxp%3D&xsec_source=app_share",
+            unwrapped
+        )
+        assertEquals("6b01911b000000002a038edc", LinkSanitizer.extractXhsNoteId(unwrapped))
+    }
 }

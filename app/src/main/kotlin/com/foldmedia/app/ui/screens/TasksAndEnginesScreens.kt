@@ -51,11 +51,13 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.foldmedia.app.BuildConfig
 import com.foldmedia.app.engine.YtDlpEngine
 import com.foldmedia.app.model.DownloadStatus
 import com.foldmedia.app.model.DownloadTask
 import com.foldmedia.app.model.LivePhotoSaveMode
 import com.foldmedia.app.model.PlatformType
+import com.foldmedia.app.model.VideoSubtitleRemoveMode
 import com.foldmedia.app.ui.MainUiState
 import com.foldmedia.app.ui.components.KindBadgePill
 import com.foldmedia.app.ui.components.isNativeAppInstalled
@@ -264,7 +266,10 @@ fun EnginesAndAccountsScreen(
     onClearLogin: (PlatformType) -> Unit,
     onSaveManualCookie: (PlatformType, String) -> Unit,
     onChangeLivePhotoMode: (LivePhotoSaveMode) -> Unit,
+    onChangeSubtitleRemoveMode: (VideoSubtitleRemoveMode) -> Unit,
     onChangeFoldOverride: (FoldPreviewOverride) -> Unit,
+    onCheckAppUpdate: () -> Unit,
+    onOpenUpdateDialog: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val platforms = listOf(
@@ -298,7 +303,10 @@ fun EnginesAndAccountsScreen(
                         foldMetrics = foldMetrics,
                         onChangeFoldOverride = onChangeFoldOverride,
                         onChangeLivePhotoMode = onChangeLivePhotoMode,
+                        onChangeSubtitleRemoveMode = onChangeSubtitleRemoveMode,
                         onUpdateEngine = onUpdateEngine,
+                        onCheckAppUpdate = onCheckAppUpdate,
+                        onOpenUpdateDialog = onOpenUpdateDialog,
                         modifier = Modifier.fillMaxHeight()
                     )
                 }
@@ -341,7 +349,10 @@ fun EnginesAndAccountsScreen(
                 foldMetrics = foldMetrics,
                 onChangeFoldOverride = onChangeFoldOverride,
                 onChangeLivePhotoMode = onChangeLivePhotoMode,
-                onUpdateEngine = onUpdateEngine
+                onChangeSubtitleRemoveMode = onChangeSubtitleRemoveMode,
+                onUpdateEngine = onUpdateEngine,
+                onCheckAppUpdate = onCheckAppUpdate,
+                onOpenUpdateDialog = onOpenUpdateDialog
             )
         }
         items(platforms) { platform ->
@@ -377,7 +388,10 @@ private fun UnifiedSettingsCard(
     foldMetrics: FoldableUiMetrics,
     onChangeFoldOverride: (FoldPreviewOverride) -> Unit,
     onChangeLivePhotoMode: (LivePhotoSaveMode) -> Unit,
+    onChangeSubtitleRemoveMode: (VideoSubtitleRemoveMode) -> Unit,
     onUpdateEngine: (Boolean) -> Unit,
+    onCheckAppUpdate: () -> Unit,
+    onOpenUpdateDialog: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(modifier = modifier.fillMaxWidth()) {
@@ -385,7 +399,7 @@ private fun UnifiedSettingsCard(
             modifier = Modifier
                 .fillMaxHeight()
                 .padding(horizontal = 16.dp, vertical = 16.dp),
-            verticalArrangement = spacedBetweenMin(18.dp)
+            verticalArrangement = spacedBetweenMin(14.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
@@ -428,6 +442,49 @@ private fun UnifiedSettingsCard(
                                 tint = FoldColors.HyperBlue,
                                 modifier = Modifier.size(18.dp)
                             )
+                        }
+                    }
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "视频去字幕默认策略（FFmpeg 本地处理）",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    VideoSubtitleRemoveMode.entries.chunked(2).forEach { pair ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            pair.forEach { mode ->
+                                val selected = uiState.videoSubtitleRemoveMode == mode
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            if (selected) FoldColors.HyperBlue.copy(alpha = 0.14f)
+                                            else MiuixTheme.colorScheme.secondaryContainer
+                                        )
+                                        .clickable { onChangeSubtitleRemoveMode(mode) }
+                                        .padding(horizontal = 10.dp, vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = mode.label,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                        color = if (selected) FoldColors.HyperBlue else MiuixTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -516,6 +573,61 @@ private fun UnifiedSettingsCard(
                         Spacer(modifier = Modifier.width(5.dp))
                         Text("Nightly 版", fontSize = 12.sp, maxLines = 1)
                     }
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MiuixTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f))
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = "应用版本 v${BuildConfig.VERSION_NAME}",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp
+                    )
+                    Text(
+                        text = uiState.appUpdateMessage ?: "启动自动检测 GitHub 新版本推送",
+                        fontSize = 11.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        color = if (uiState.availableUpdate != null) FoldColors.HyperBlue else MiuixTheme.colorScheme.onSurfaceVariantSummary
+                    )
+                }
+                Button(
+                    onClick = {
+                        if (uiState.availableUpdate != null) onOpenUpdateDialog() else onCheckAppUpdate()
+                    },
+                    enabled = !uiState.isCheckingAppUpdate && !uiState.isDownloadingUpdate,
+                    minWidth = 0.dp,
+                    minHeight = 32.dp,
+                    insideMargin = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    colors = if (uiState.availableUpdate != null) {
+                        ButtonDefaults.buttonColorsPrimary()
+                    } else {
+                        ButtonDefaults.buttonColors()
+                    }
+                ) {
+                    Text(
+                        text = when {
+                            uiState.isCheckingAppUpdate -> "检测中..."
+                            uiState.availableUpdate != null -> "升级 ${uiState.availableUpdate.tagName}"
+                            else -> "检查更新"
+                        },
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        color = if (uiState.availableUpdate != null) MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.onSurface
+                    )
                 }
             }
         }

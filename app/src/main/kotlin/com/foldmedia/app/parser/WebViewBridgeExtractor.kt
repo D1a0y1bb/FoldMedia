@@ -142,6 +142,12 @@ class WebViewBridgeExtractor(private val appContext: Context) {
                                 }
                               }
                             }
+                            if (s && s.noteData && s.noteData.data && s.noteData.data.noteData) {
+                              var n = s.noteData.data.noteData;
+                              if ((n.imageList && n.imageList.length > 0) || n.video) {
+                                return JSON.stringify(s);
+                              }
+                            }
                             return "";
                           } catch(e) { return ""; }
                         })();

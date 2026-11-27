@@ -9,21 +9,29 @@
   <img src="docs/images/fold-settings-dualpane.png" width="49%" alt="设置与多账号管理" />
 </p>
 
-## v1.0.1 升级亮点与实机截图
+## v1.0.2 升级亮点与实机截图
 
-- **微信支持上线**：新增微信公众号文章（高清原图、封面、内嵌视频与正文）及微信表情贴图专辑（含动态 GIF 保持动效写入相册）本地解析。
-- **抖音实况图深度提取**：新增 PC 详情页 `self.__pace_f` 实况视频流解析，精准识别图文笔记内嵌的 `playAddr` 微视频，按小米 `MVIMG` 规范合成实况照片。
-- **X (Twitter) 提取与 HLS 混流修复**：修复长时卡在「本地引擎解析中」问题（切换非阻塞输出 + 30 秒超时 + 可随时「取消」）；支持免登录提取 FxTwitter 敏感内容；新增 FFmpeg 本地 `.m3u8` 音视频分轨合并输出标准 MP4。
-- **APK 体积大幅瘦身**：开启正式版 R8 代码混淆压缩与资源缩减（`isMinifyEnabled` / `isShrinkResources`），移除冗余 Aria2c 与 `xmpcore` 依赖，`arm64-v8a` 安装包从 114 MB 瘦身至约 **60 MB**。
-- **折叠屏双栏 UI 对齐优化**：双栏空白态底部齐平，右侧能力卡片升级为对称 2×3 网格，提取中进度按钮与「取消」按钮等高对齐。
+- **修复全新安装 R8 混淆崩溃（`pf0`）**：为 `org.apache.commons.compress` 与 `org.apache.commons.io` 补齐 ProGuard 规则，解决首次安装解压本地引擎报错。
+- **小红书 `xhslink.cn` 免登录实况解析**：识别 `xhslink.cn` 短链与 `/login?redirectPath=...` 跳转参数，支持移动端 `noteData.data.noteData` 与 `H5_DTL` 高清图/实况双流提取，无需登录即可保存小米 `MVIMG`。
+- **抖音登录体验增强**：登录页补全 `WebChromeClient`（运行期授予人脸验证相机权限、弹窗接管与文件选择器）、`browser_fallback_url` 回退与刷新/返回操作。
+- **新增 FFmpeg「去视频字幕」能力**：支持「关闭（原画直出）」「清除软字幕轨」「智能淡化底部硬字幕（`delogo`）」「裁切底部字幕区」四种本地处理策略。
+- **应用内自动检查更新与一键升级**：启动自动检测 GitHub Releases 新版本并在设置页提供手动检查入口，匹配对应架构 APK 下载并通过系统安装器直接升级。
+
+### v1.0.1 基础升级回顾
+- **微信支持**：支持微信公众号高清配图/封面/动图 GIF 与表情贴图专辑提取。
+- **抖音实况深度提取**：支持桌面端 `self.__pace_f` 图集内嵌实况视频流与小米 `MVIMG` 合成。
+- **X 提取与混流 / APK 瘦身**：修复长时间卡顿、支持 FxTwitter 无登录敏感内容与 FFmpeg `.m3u8` 混流 MP4；启用 R8 压缩使 `arm64-v8a` 体积降至约 **61 MB**。
 
 <p align="center">
+  <img src="docs/images/fold-xhs-live.png" width="49%" alt="小红书 xhslink.cn 免登录实况图提取" />
   <img src="docs/images/fold-douyin-live.png" width="49%" alt="抖音实况图 50 张双流提取" />
-  <img src="docs/images/fold-douyin-mvimg-task.png" width="49%" alt="小米实况照片 MVIMG 保存完成" />
 </p>
 <p align="center">
-  <img src="docs/images/fold-x-hls.png" width="49%" alt="X 直连与 HLS 音视频合并 MP4" />
+  <img src="docs/images/fold-x-hls.png" width="49%" alt="X 直连与去字幕策略选择" />
   <img src="docs/images/fold-wechat-extract.png" width="49%" alt="微信公众号高清配图与动图提取" />
+</p>
+<p align="center">
+  <img src="docs/images/fold-douyin-mvimg-task.png" width="49%" alt="小米实况照片 MVIMG 保存完成" />
 </p>
 
 ## 核心特性
@@ -43,7 +51,7 @@
 
 前往 [Releases](https://github.com/D1a0y1bb/FoldMedia/releases) 页面下载对应安装包：
 
-- **现代 Android 手机（含 Xiaomi 18 Fold / 骁龙 64 位设备推荐）**：下载 `FoldMedia-v*-arm64-v8a-release.apk`（v1.0.1 约 60 MB）
+- **现代 Android 手机（含 Xiaomi 18 Fold / 骁龙 64 位设备推荐）**：下载 `FoldMedia-v*-arm64-v8a-release.apk`（约 61 MB）
 - **多架构 / 模拟器通用版**：下载 `FoldMedia-v*-universal-release.apk`（约 199 MB）
 
 ## 从源码构建

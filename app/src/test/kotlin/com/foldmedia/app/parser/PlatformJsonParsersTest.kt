@@ -302,4 +302,24 @@ class PlatformJsonParsersTest {
         assertEquals("https://p11-sign.douyinpic.com/clean.webp", post.items[0].imageUrl)
         assertEquals("https://v26.douyinvod.com/aweme/v1/play/?video_id=live99", post.items[0].videoUrl)
     }
+
+    @Test
+    fun parsesXiaohongshuMobileNoteDataLivePhoto() {
+        val mobileHtml = """
+            <html><body><script>window.__INITIAL_STATE__={"global":{"supportWebp":true},"noteData":{"data":{"noteData":{"noteId":"6b01911b000000002a038edc","type":"normal","title":"大连海边雪景","desc":"蓝调时刻","user":{"nickname":"旅拍者"},"imageList":[{"width":1920,"height":2560,"url":"http://sns-webpic-qc.xhscdn.com/preview.jpg","infoList":[{"url":"http://sns-webpic-qc.xhscdn.com/h5_dtl.jpg","imageScene":"H5_DTL"}],"livePhoto":true,"stream":{"h264":[{"masterUrl":"http://sns-video-v6.xhscdn.com/live.mp4","backupUrls":["http://sns-bak-v1.xhscdn.com/live_bak.mp4"]}]}}]}}}}</script></body></html>
+        """.trimIndent()
+
+        val post = PlatformJsonParsers.parseXiaohongshuInitialState(
+            rawHtmlOrJson = mobileHtml,
+            originalInput = "https://xhslink.cn/o/5FmFyZt7HDO",
+            resolvedUrl = "https://www.xiaohongshu.com/discovery/item/6b01911b000000002a038edc"
+        )
+        assertEquals(PlatformType.XIAOHONGSHU, post.platform)
+        assertEquals("6b01911b000000002a038edc", post.id)
+        assertEquals("旅拍者", post.authorName)
+        assertEquals(1, post.items.size)
+        assertEquals(MediaKind.LIVE_PHOTO, post.items[0].kind)
+        assertEquals("https://sns-webpic-qc.xhscdn.com/h5_dtl.jpg", post.items[0].imageUrl)
+        assertEquals("https://sns-video-v6.xhscdn.com/live.mp4", post.items[0].videoUrl)
+    }
 }

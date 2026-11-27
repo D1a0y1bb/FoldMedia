@@ -42,12 +42,13 @@ class MediaExtractorRepository(
         val cleanUrl = LinkSanitizer.extractCleanUrl(rawInput)
             ?: throw IllegalArgumentException("未识别到有效的 http/https 链接，请粘贴包含分享链接的文本")
 
-        val resolvedUrl = if (LinkSanitizer.isShortRedirectUrl(cleanUrl)) {
+        val expandedUrl = if (LinkSanitizer.isShortRedirectUrl(cleanUrl)) {
             onStageUpdate("正在展开短链接...")
             resolveRedirectUrl(cleanUrl)
         } else {
             cleanUrl
         }
+        val resolvedUrl = LinkSanitizer.unwrapXiaohongshuLoginRedirect(expandedUrl)
 
         if (LinkSanitizer.isHlsStreamUrl(resolvedUrl)) {
             return@withContext buildDirectHlsPost(rawInput, resolvedUrl)
@@ -134,6 +135,7 @@ class MediaExtractorRepository(
                     if (!location.isNullOrBlank()) {
                         location
                     } else if (current.contains("xhslink.com", ignoreCase = true) ||
+                        current.contains("xhslink.cn", ignoreCase = true) ||
                         current.contains("t.co", ignoreCase = true)
                     ) {
                         extractHtmlRedirect(resp.body.string())
@@ -296,33 +298,51 @@ class MediaExtractorRepository(
         resolvedUrl: String,
         onStageUpdate: (String) -> Unit
     ): ExtractedPost {
-        val noteId = LinkSanitizer.extractXhsNoteId(resolvedUrl)
-        val canonicalUrl = if (!noteId.isNullOrBlank() && resolvedUrl.contains("/discovery/item/")) {
-            resolvedUrl.replace("/discovery/item/$noteId", "/explore/$noteId")
-        } else {
-            resolvedUrl
+        val unwrappedUrl = LinkSanitizer.unwrapXiaohongshuLoginRedirect(resolvedUrl)
+        val noteId = LinkSanitizer.extractXhsNoteId(unwrappedUrl)
+        val querySuffix = unwrappedUrl.indexOf('?').let { idx ->
+            if (idx >= 0) unwrappedUrl.substring(idx) else ""
         }
-        val cookie = cookieVault.getAuthenticatedCookieHeader(PlatformType.XIAOHONGSHU, canonicalUrl)
+        val discoveryUrl = if (!noteId.isNullOrBlank()) {
+            "https://www.xiaohongshu.com/discovery/item/$noteId$querySuffix"
+        } else {
+            unwrappedUrl
+        }
+        val exploreUrl = if (!noteId.isNullOrBlank()) {
+            "https://www.xiaohongshu.com/explore/$noteId$querySuffix"
+        } else {
+            unwrappedUrl
+        }
+        val cookie = cookieVault.getAuthenticatedCookieHeader(PlatformType.XIAOHONGSHU, exploreUrl)
         var lastError: Throwable? = null
 
         onStageUpdate("正在解析小红书图文/实况...")
-        for (targetUrl in listOf(canonicalUrl, resolvedUrl).distinct()) {
+        // Try mobile H5 `/discovery/item/` FIRST when unauthenticated (desktop `/explore/` 302s to /login),
+        // then desktop `/explore/` (using authenticated session cookie if present).
+        val directAttempts = listOf(
+            discoveryUrl to MOBILE_SAFARI_UA,
+            exploreUrl to DESKTOP_CHROME_UA,
+            unwrappedUrl to DESKTOP_CHROME_UA
+        ).distinctBy { "${it.first}|${it.second}" }
+
+        for ((targetUrl, ua) in directAttempts) {
             val directResult = runCatching {
                 val html = fetchText(
                     url = targetUrl,
-                    userAgent = DESKTOP_CHROME_UA,
+                    userAgent = ua,
                     cookieHeader = cookie,
                     referer = "https://www.xiaohongshu.com/"
                 )
-                PlatformJsonParsers.parseXiaohongshuInitialState(html, rawInput, resolvedUrl)
+                PlatformJsonParsers.parseXiaohongshuInitialState(html, rawInput, unwrappedUrl)
             }
             if (directResult.isSuccess) return directResult.getOrThrow()
             lastError = directResult.exceptionOrNull()
         }
 
         onStageUpdate("正在通过 WebView 提取小红书...")
+        val webViewTarget = if (cookie.isBlank()) discoveryUrl else exploreUrl
         val webViewJson = webViewBridge.extractStateJson(
-            url = canonicalUrl,
+            url = webViewTarget,
             targetType = WebViewBridgeExtractor.TargetStateType.XIAOHONGSHU_INITIAL_STATE
         )
         if (webViewJson.isSuccess) {
@@ -330,7 +350,7 @@ class MediaExtractorRepository(
                 PlatformJsonParsers.parseXiaohongshuInitialState(
                     rawHtmlOrJson = webViewJson.getOrThrow(),
                     originalInput = rawInput,
-                    resolvedUrl = resolvedUrl
+                    resolvedUrl = unwrappedUrl
                 ).copy(engineUsed = "小红书 WebView 实况解析")
             }
             if (parsed.isSuccess) return parsed.getOrThrow()
@@ -341,10 +361,10 @@ class MediaExtractorRepository(
 
         onStageUpdate("本地 yt-dlp 引擎兜底解析中...")
         return runCatching {
-            extractWithYtDlp(rawInput, canonicalUrl, PlatformType.XIAOHONGSHU)
+            extractWithYtDlp(rawInput, discoveryUrl, PlatformType.XIAOHONGSHU)
         }.getOrElse {
             val authTip = if (cookie.isBlank()) {
-                "当前未检测到小红书真实登录态（web_session），请前往「设置」完成扫码/授权后再试。"
+                "当前未检测到小红书真实登录态（web_session），请前往「账号与设置」完成扫码/授权后再试。"
             } else {
                 "触发临时风控校验或原笔记不可见，可尝试在分享链接中保留完整口令或重新登录一次。"
             }

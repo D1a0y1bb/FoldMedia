@@ -125,6 +125,7 @@ class CookieVault(context: Context) {
         )
         PlatformType.DOUYIN -> listOf(
             "https://www.douyin.com/",
+            "https://login.douyin.com/",
             "https://sso.douyin.com/",
             "https://www.iesdouyin.com/",
             "https://douyin.com/"

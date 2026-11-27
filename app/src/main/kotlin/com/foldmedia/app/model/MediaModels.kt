@@ -125,6 +125,25 @@ enum class LivePhotoSaveMode(val label: String, val description: String) {
     )
 }
 
+enum class VideoSubtitleRemoveMode(val label: String, val description: String) {
+    OFF(
+        label = "关闭（原画直出）",
+        description = "保持原始视频流，不重新编码"
+    ),
+    SOFT_STRIP(
+        label = "清除软字幕轨",
+        description = "无损移除封装软字幕（-c copy -sn），秒级完成"
+    ),
+    DELOGO_BOTTOM(
+        label = "智能淡化底部硬字幕",
+        description = "FFmpeg delogo 淡化底部居中字幕区，保留画幅与原音轨"
+    ),
+    CROP_BOTTOM(
+        label = "裁切底部字幕区",
+        description = "无涂抹裁掉底部 14% 固定字幕区，保留原音轨"
+    )
+}
+
 enum class DownloadStatus(val label: String) {
     QUEUED("排队中"),
     DOWNLOADING("下载中"),
@@ -140,6 +159,7 @@ data class DownloadTask(
     val platform: PlatformType,
     val item: MediaItem,
     val livePhotoSaveMode: LivePhotoSaveMode,
+    val videoSubtitleRemoveMode: VideoSubtitleRemoveMode = VideoSubtitleRemoveMode.OFF,
     val status: DownloadStatus,
     val progress: Float = 0f,
     val statusMessage: String = "",

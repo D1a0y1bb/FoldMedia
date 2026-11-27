@@ -33,7 +33,7 @@ object LinkSanitizer {
         val host = extractHost(url).lowercase()
         return when {
             host.contains("douyin.com") || host.contains("iesdouyin.com") -> PlatformType.DOUYIN
-            host.contains("xiaohongshu.com") || host.contains("xhslink.com") -> PlatformType.XIAOHONGSHU
+            host.contains("xiaohongshu.com") || host.contains("xhslink.com") || host.contains("xhslink.cn") -> PlatformType.XIAOHONGSHU
             host == "x.com" || host.endsWith(".x.com") ||
                 host.contains("twitter.com") || host.contains("fxtwitter.com") ||
                 host.contains("vxtwitter.com") || host == "t.co" ||
@@ -52,6 +52,8 @@ object LinkSanitizer {
         return host == "v.douyin.com" ||
             host == "xhslink.com" ||
             host.endsWith(".xhslink.com") ||
+            host == "xhslink.cn" ||
+            host.endsWith(".xhslink.cn") ||
             host == "t.co" ||
             host == "youtu.be" ||
             host == "b23.tv" ||
@@ -71,6 +73,28 @@ object LinkSanitizer {
             lower.contains("/slides/") -> "slides"
             lower.contains("/note/") -> "note"
             else -> "video"
+        }
+    }
+
+    /** Unwraps `xiaohongshu.com/login?redirectPath=...` back to the target note URL with `xsec_token`. */
+    fun unwrapXiaohongshuLoginRedirect(url: String): String {
+        val host = extractHost(url).lowercase()
+        if (!host.contains("xiaohongshu.com")) return url
+        val path = url.substringAfter("://", url).substringAfter('/', "").substringBefore('?')
+        if (!path.contains("login", ignoreCase = true)) return url
+        val query = url.substringAfter('?', "")
+        val redirectParam = query.split('&')
+            .firstOrNull { it.startsWith("redirectPath=", ignoreCase = true) }
+            ?.substringAfter('=')
+            ?.takeIf { it.isNotBlank() }
+            ?: return url
+        val decoded = runCatching {
+            java.net.URLDecoder.decode(redirectParam, Charsets.UTF_8.name())
+        }.getOrNull()?.trim() ?: return url
+        return if (decoded.startsWith("http://") || decoded.startsWith("https://")) {
+            normalizeHttps(decoded)
+        } else {
+            url
         }
     }
 

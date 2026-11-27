@@ -9,6 +9,7 @@ import com.foldmedia.app.model.LivePhotoSaveMode
 import com.foldmedia.app.model.MediaItem
 import com.foldmedia.app.model.MediaKind
 import com.foldmedia.app.model.PlatformType
+import com.foldmedia.app.model.VideoSubtitleRemoveMode
 import com.foldmedia.app.parser.LinkSanitizer
 import com.foldmedia.app.parser.MediaExtractorRepository
 import com.foldmedia.app.storage.CookieVault
@@ -40,6 +41,7 @@ class DownloadManagerCoordinator(
         post: ExtractedPost,
         items: List<MediaItem>,
         livePhotoMode: LivePhotoSaveMode,
+        subtitleRemoveMode: VideoSubtitleRemoveMode = VideoSubtitleRemoveMode.OFF,
         onTaskCreated: (DownloadTask) -> Unit,
         onTaskUpdated: (String, (DownloadTask) -> DownloadTask) -> Unit
     ) {
@@ -51,6 +53,7 @@ class DownloadManagerCoordinator(
                 platform = post.platform,
                 item = item,
                 livePhotoSaveMode = livePhotoMode,
+                videoSubtitleRemoveMode = subtitleRemoveMode,
                 status = DownloadStatus.QUEUED,
                 statusMessage = "等待调度..."
             )
@@ -63,6 +66,7 @@ class DownloadManagerCoordinator(
                         post = post,
                         item = item,
                         livePhotoMode = livePhotoMode,
+                        subtitleRemoveMode = subtitleRemoveMode,
                         onTaskUpdated = onTaskUpdated
                     )
                 }
@@ -75,13 +79,14 @@ class DownloadManagerCoordinator(
         post: ExtractedPost,
         item: MediaItem,
         livePhotoMode: LivePhotoSaveMode,
+        subtitleRemoveMode: VideoSubtitleRemoveMode,
         onTaskUpdated: (String, (DownloadTask) -> DownloadTask) -> Unit
     ) {
         try {
             when (item.kind) {
                 MediaKind.IMAGE -> handleImageDownload(taskId, post, item, onTaskUpdated)
                 MediaKind.LIVE_PHOTO -> handleLivePhotoDownload(taskId, post, item, livePhotoMode, onTaskUpdated)
-                MediaKind.VIDEO, MediaKind.AUDIO -> handleVideoDownload(taskId, post, item, onTaskUpdated)
+                MediaKind.VIDEO, MediaKind.AUDIO -> handleVideoDownload(taskId, post, item, subtitleRemoveMode, onTaskUpdated)
             }
         } catch (t: Throwable) {
             onTaskUpdated(taskId) {
@@ -199,6 +204,7 @@ class DownloadManagerCoordinator(
         taskId: String,
         post: ExtractedPost,
         item: MediaItem,
+        subtitleRemoveMode: VideoSubtitleRemoveMode,
         onTaskUpdated: (String, (DownloadTask) -> DownloadTask) -> Unit
     ) {
         val tempDir = File(appContext.cacheDir, "dl_job_$taskId").apply { mkdirs() }
@@ -246,15 +252,30 @@ class DownloadManagerCoordinator(
                     }
                 }
 
+                val isAudioSelected = selectedQuality?.isAudioOnly == true || item.kind == MediaKind.AUDIO
+                val finalFile = if (!isAudioSelected && subtitleRemoveMode != VideoSubtitleRemoveMode.OFF) {
+                    ytDlpEngine.removeVideoSubtitles(outFile, tempDir, subtitleRemoveMode) { frac, msg ->
+                        onTaskUpdated(taskId) {
+                            it.copy(
+                                status = DownloadStatus.DOWNLOADING,
+                                progress = frac.coerceIn(0.85f, 0.94f),
+                                statusMessage = msg
+                            )
+                        }
+                    }
+                } else {
+                    outFile
+                }
+
                 onTaskUpdated(taskId) {
-                    it.copy(status = DownloadStatus.SAVING_TO_GALLERY, progress = 0.94f, statusMessage = "写入系统媒体库...")
+                    it.copy(status = DownloadStatus.SAVING_TO_GALLERY, progress = 0.96f, statusMessage = "写入系统媒体库...")
                 }
 
                 val baseName = "${post.platform.shortBadge}_${post.title}_${post.id}"
-                val saved = if (selectedQuality?.isAudioOnly == true || item.kind == MediaKind.AUDIO) {
-                    mediaSaver.saveAudioFile(outFile, baseName)
+                val saved = if (isAudioSelected) {
+                    mediaSaver.saveAudioFile(finalFile, baseName)
                 } else {
-                    mediaSaver.saveVideoFile(outFile, baseName)
+                    mediaSaver.saveVideoFile(finalFile, baseName)
                 }
 
                 onTaskUpdated(taskId) {
@@ -294,15 +315,29 @@ class DownloadManagerCoordinator(
                     }
                 }
 
+                val finalFile = if (!isAudio && subtitleRemoveMode != VideoSubtitleRemoveMode.OFF) {
+                    ytDlpEngine.removeVideoSubtitles(tmpFile, tempDir, subtitleRemoveMode) { frac, msg ->
+                        onTaskUpdated(taskId) {
+                            it.copy(
+                                status = DownloadStatus.DOWNLOADING,
+                                progress = frac.coerceIn(0.85f, 0.94f),
+                                statusMessage = msg
+                            )
+                        }
+                    }
+                } else {
+                    tmpFile
+                }
+
                 onTaskUpdated(taskId) {
-                    it.copy(status = DownloadStatus.SAVING_TO_GALLERY, progress = 0.95f, statusMessage = "写入系统相册...")
+                    it.copy(status = DownloadStatus.SAVING_TO_GALLERY, progress = 0.96f, statusMessage = "写入系统相册...")
                 }
 
                 val baseName = "${post.platform.shortBadge}_${post.title}_${post.id}"
                 val saved = if (isAudio) {
-                    mediaSaver.saveAudioFile(tmpFile, baseName)
+                    mediaSaver.saveAudioFile(finalFile, baseName)
                 } else {
-                    mediaSaver.saveVideoFile(tmpFile, baseName)
+                    mediaSaver.saveVideoFile(finalFile, baseName)
                 }
                 onTaskUpdated(taskId) {
                     it.copy(

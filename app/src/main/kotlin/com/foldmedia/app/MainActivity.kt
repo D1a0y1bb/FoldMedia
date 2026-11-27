@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.foldmedia.app.model.AppTab
 import com.foldmedia.app.ui.MainViewModel
+import com.foldmedia.app.ui.components.AppUpdateDialog
 import com.foldmedia.app.ui.components.LiquidDockItem
 import com.foldmedia.app.ui.components.LiquidGlassNavigationDock
 import com.foldmedia.app.ui.components.MediaPreviewDialog
@@ -113,6 +114,7 @@ class MainActivity : ComponentActivity() {
                             onClearSelection = viewModel::clearItemSelection,
                             onSelectQuality = viewModel::selectQualityOption,
                             onChangeLiveMode = viewModel::setLivePhotoSaveMode,
+                            onChangeSubtitleRemoveMode = viewModel::setVideoSubtitleRemoveMode,
                             onOpenPreview = viewModel::openPreview,
                             onDownloadSelected = viewModel::downloadSelectedItems,
                             modifier = contentModifier
@@ -134,7 +136,10 @@ class MainActivity : ComponentActivity() {
                             onClearLogin = viewModel::clearPlatformLogin,
                             onSaveManualCookie = viewModel::saveManualCookie,
                             onChangeLivePhotoMode = viewModel::setLivePhotoSaveMode,
+                            onChangeSubtitleRemoveMode = viewModel::setVideoSubtitleRemoveMode,
                             onChangeFoldOverride = viewModel::setFoldPreviewOverride,
+                            onCheckAppUpdate = { viewModel.checkForAppUpdate(manual = true) },
+                            onOpenUpdateDialog = viewModel::openAvailableUpdateDialog,
                             modifier = contentModifier
                         )
                     }
@@ -155,6 +160,21 @@ class MainActivity : ComponentActivity() {
                     PlatformLoginDialog(
                         platform = platform,
                         onDone = viewModel::closePlatformLogin
+                    )
+                }
+
+                val pendingUpdate = uiState.availableUpdate
+                if (uiState.showUpdateDialog && pendingUpdate != null) {
+                    AppUpdateDialog(
+                        release = pendingUpdate,
+                        isDownloading = uiState.isDownloadingUpdate,
+                        downloadProgress = uiState.updateDownloadProgress,
+                        downloadStatus = uiState.updateDownloadStatus,
+                        downloadedApkReady = !uiState.downloadedUpdateApkPath.isNullOrBlank(),
+                        errorMessage = uiState.appUpdateMessage?.takeIf { it.contains("失败") || it.contains("允许") },
+                        onDownloadAndInstall = viewModel::startUpdateDownloadAndInstall,
+                        onInstallReadyApk = viewModel::installDownloadedUpdate,
+                        onDismiss = viewModel::dismissUpdateDialog
                     )
                 }
             }

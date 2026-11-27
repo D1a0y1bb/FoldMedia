@@ -1,8 +1,10 @@
 package com.foldmedia.app.ui
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.foldmedia.app.BuildConfig
 import com.foldmedia.app.FoldMediaApp
 import com.foldmedia.app.engine.YtDlpEngine
 import com.foldmedia.app.media.DownloadManagerCoordinator
@@ -14,10 +16,15 @@ import com.foldmedia.app.model.LivePhotoSaveMode
 import com.foldmedia.app.model.MediaItem
 import com.foldmedia.app.model.MediaKind
 import com.foldmedia.app.model.PlatformType
+import com.foldmedia.app.model.VideoSubtitleRemoveMode
 import com.foldmedia.app.parser.LinkSanitizer
 import com.foldmedia.app.ui.fold.FoldPreviewOverride
+import com.foldmedia.app.update.AppReleaseInfo
+import com.foldmedia.app.update.InstallLaunchResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,6 +42,7 @@ data class MainUiState(
     val historyPosts: List<ExtractedPost> = emptyList(),
     val tasks: List<DownloadTask> = emptyList(),
     val livePhotoSaveMode: LivePhotoSaveMode = LivePhotoSaveMode.XIAOMI_MOTION_PHOTO,
+    val videoSubtitleRemoveMode: VideoSubtitleRemoveMode = VideoSubtitleRemoveMode.OFF,
     val foldPreviewOverride: FoldPreviewOverride = FoldPreviewOverride.AUTO,
     val previewItem: MediaItem? = null,
     val showPreviewDialog: Boolean = false,
@@ -43,7 +51,15 @@ data class MainUiState(
     val engineUpdateMessage: String? = null,
     val cookieStatusMap: Map<PlatformType, Boolean> = emptyMap(),
     val clipboardBannerUrl: String? = null,
-    val statusNotice: String? = null
+    val statusNotice: String? = null,
+    val availableUpdate: AppReleaseInfo? = null,
+    val showUpdateDialog: Boolean = false,
+    val isCheckingAppUpdate: Boolean = false,
+    val appUpdateMessage: String? = null,
+    val isDownloadingUpdate: Boolean = false,
+    val updateDownloadProgress: Float = 0f,
+    val updateDownloadStatus: String = "",
+    val downloadedUpdateApkPath: String? = null
 ) {
     val activeTaskCount: Int
         get() = tasks.count {
@@ -60,6 +76,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = app.extractorRepository
     private val cookieVault = app.cookieVault
     private val ytDlpEngine = app.ytDlpEngine
+    private val appUpdateManager = app.appUpdateManager
     private val coordinator = DownloadManagerCoordinator(
         appContext = app,
         httpClient = app.okHttpClient,
@@ -69,13 +86,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         mediaSaver = app.mediaSaver
     )
 
-    private val _uiState = MutableStateFlow(MainUiState())
+    private val prefs = app.getSharedPreferences("foldmedia_prefs", Context.MODE_PRIVATE)
+    private val _uiState = MutableStateFlow(
+        MainUiState(
+            videoSubtitleRemoveMode = runCatching {
+                prefs.getString("subtitle_remove_mode", VideoSubtitleRemoveMode.OFF.name)
+                    ?.let(VideoSubtitleRemoveMode::valueOf)
+            }.getOrNull() ?: VideoSubtitleRemoveMode.OFF
+        )
+    )
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
     val ytDlpStatus: StateFlow<YtDlpEngine.EngineStatus> = ytDlpEngine.status
     private var extractJob: Job? = null
 
     init {
         refreshCookieStatuses()
+        viewModelScope.launch {
+            delay(1500L)
+            checkForAppUpdate(manual = false)
+        }
     }
 
     fun selectTab(tab: AppTab) {
@@ -251,6 +280,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(livePhotoSaveMode = mode) }
     }
 
+    fun setVideoSubtitleRemoveMode(mode: VideoSubtitleRemoveMode) {
+        prefs.edit().putString("subtitle_remove_mode", mode.name).apply()
+        _uiState.update { it.copy(videoSubtitleRemoveMode = mode) }
+    }
+
     fun setFoldPreviewOverride(override: FoldPreviewOverride) {
         _uiState.update { it.copy(foldPreviewOverride = override) }
     }
@@ -285,6 +319,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             post = post,
             items = selected,
             livePhotoMode = state.livePhotoSaveMode,
+            subtitleRemoveMode = state.videoSubtitleRemoveMode,
             onTaskCreated = { newTask ->
                 _uiState.update { s ->
                     s.copy(
@@ -358,5 +393,127 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissNotice() {
         _uiState.update { it.copy(statusNotice = null) }
+    }
+
+    fun checkForAppUpdate(manual: Boolean) {
+        if (_uiState.value.isCheckingAppUpdate || _uiState.value.isDownloadingUpdate) return
+        viewModelScope.launch {
+            if (manual) {
+                _uiState.update {
+                    it.copy(
+                        isCheckingAppUpdate = true,
+                        appUpdateMessage = "正在检查 GitHub 新版本..."
+                    )
+                }
+            } else {
+                _uiState.update { it.copy(isCheckingAppUpdate = true) }
+            }
+            val res = appUpdateManager.checkLatestRelease(BuildConfig.VERSION_NAME)
+            res.onSuccess { release ->
+                if (release == null) {
+                    _uiState.update {
+                        it.copy(
+                            isCheckingAppUpdate = false,
+                            availableUpdate = null,
+                            appUpdateMessage = if (manual) "当前已是最新版本 (v${BuildConfig.VERSION_NAME})" else it.appUpdateMessage
+                        )
+                    }
+                } else {
+                    val ignoredTag = prefs.getString("ignored_update_tag", "").orEmpty()
+                    val shouldPopDialog = manual || release.tagName != ignoredTag
+                    _uiState.update {
+                        it.copy(
+                            isCheckingAppUpdate = false,
+                            availableUpdate = release,
+                            showUpdateDialog = shouldPopDialog,
+                            appUpdateMessage = "发现新版本 ${release.tagName}"
+                        )
+                    }
+                }
+            }.onFailure { err ->
+                _uiState.update {
+                    it.copy(
+                        isCheckingAppUpdate = false,
+                        appUpdateMessage = if (manual) "检查更新失败: ${err.message ?: "网络异常"}" else it.appUpdateMessage
+                    )
+                }
+            }
+        }
+    }
+
+    fun openAvailableUpdateDialog() {
+        if (_uiState.value.availableUpdate != null) {
+            _uiState.update { it.copy(showUpdateDialog = true) }
+        }
+    }
+
+    fun dismissUpdateDialog(ignoreThisVersion: Boolean = false) {
+        val tag = _uiState.value.availableUpdate?.tagName
+        if (ignoreThisVersion && !tag.isNullOrBlank()) {
+            prefs.edit().putString("ignored_update_tag", tag).apply()
+        }
+        _uiState.update { it.copy(showUpdateDialog = false) }
+    }
+
+    fun startUpdateDownloadAndInstall() {
+        val release = _uiState.value.availableUpdate ?: return
+        if (_uiState.value.isDownloadingUpdate) return
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isDownloadingUpdate = true,
+                    updateDownloadProgress = 0f,
+                    updateDownloadStatus = "准备下载 ${release.tagName}...",
+                    appUpdateMessage = null
+                )
+            }
+            val result = appUpdateManager.downloadUpdateApk(release) { progress, msg ->
+                _uiState.update {
+                    it.copy(
+                        updateDownloadProgress = progress,
+                        updateDownloadStatus = msg
+                    )
+                }
+            }
+            result.onSuccess { apkFile ->
+                _uiState.update {
+                    it.copy(
+                        isDownloadingUpdate = false,
+                        updateDownloadProgress = 1f,
+                        updateDownloadStatus = "下载完成，正在拉起系统安装器...",
+                        downloadedUpdateApkPath = apkFile.absolutePath
+                    )
+                }
+                installDownloadedUpdate()
+            }.onFailure { err ->
+                _uiState.update {
+                    it.copy(
+                        isDownloadingUpdate = false,
+                        updateDownloadStatus = "",
+                        appUpdateMessage = "更新包下载失败: ${err.message ?: "请检查网络后重试"}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun installDownloadedUpdate() {
+        val path = _uiState.value.downloadedUpdateApkPath ?: return
+        val result = appUpdateManager.launchApkInstaller(app, File(path))
+        when (result) {
+            InstallLaunchResult.LAUNCHED -> {
+                _uiState.update { it.copy(showUpdateDialog = false, statusNotice = "已打开系统安装器，按提示确认升级") }
+            }
+            InstallLaunchResult.NEED_PERMISSION -> {
+                _uiState.update {
+                    it.copy(appUpdateMessage = "请在系统设置中允许「叠影提取」安装未知应用，授权后返回点击「立即安装」")
+                }
+            }
+            InstallLaunchResult.FAILED -> {
+                _uiState.update {
+                    it.copy(appUpdateMessage = "拉起系统安装器失败，可点击「浏览器打开」前往 GitHub 下载页面安装")
+                }
+            }
+        }
     }
 }

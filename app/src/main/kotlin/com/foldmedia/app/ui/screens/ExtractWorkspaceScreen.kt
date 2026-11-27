@@ -70,6 +70,7 @@ import com.foldmedia.app.model.LivePhotoSaveMode
 import com.foldmedia.app.model.MediaItem
 import com.foldmedia.app.model.MediaKind
 import com.foldmedia.app.model.PlatformType
+import com.foldmedia.app.model.VideoSubtitleRemoveMode
 import com.foldmedia.app.ui.MainUiState
 import com.foldmedia.app.ui.components.KindBadgePill
 import com.foldmedia.app.ui.components.MediaStageBox
@@ -108,6 +109,7 @@ fun ExtractWorkspaceScreen(
     onClearSelection: () -> Unit,
     onSelectQuality: (String, String) -> Unit,
     onChangeLiveMode: (LivePhotoSaveMode) -> Unit,
+    onChangeSubtitleRemoveMode: (VideoSubtitleRemoveMode) -> Unit,
     onOpenPreview: (MediaItem) -> Unit,
     onDownloadSelected: () -> Unit,
     modifier: Modifier = Modifier
@@ -145,6 +147,7 @@ fun ExtractWorkspaceScreen(
             onClearSelection = onClearSelection,
             onSelectQuality = onSelectQuality,
             onChangeLiveMode = onChangeLiveMode,
+            onChangeSubtitleRemoveMode = onChangeSubtitleRemoveMode,
             onOpenPreview = onOpenPreview,
             onDownloadSelected = onDownloadSelected,
             modifier = modifier
@@ -166,6 +169,7 @@ fun ExtractWorkspaceScreen(
             onClearSelection = onClearSelection,
             onSelectQuality = onSelectQuality,
             onChangeLiveMode = onChangeLiveMode,
+            onChangeSubtitleRemoveMode = onChangeSubtitleRemoveMode,
             onOpenPreview = onOpenPreview,
             onDownloadSelected = onDownloadSelected,
             modifier = modifier
@@ -190,6 +194,7 @@ private fun CoverCompactLayout(
     onClearSelection: () -> Unit,
     onSelectQuality: (String, String) -> Unit,
     onChangeLiveMode: (LivePhotoSaveMode) -> Unit,
+    onChangeSubtitleRemoveMode: (VideoSubtitleRemoveMode) -> Unit,
     onOpenPreview: (MediaItem) -> Unit,
     onDownloadSelected: () -> Unit,
     modifier: Modifier = Modifier
@@ -227,7 +232,9 @@ private fun CoverCompactLayout(
                 PostSummaryAndToolbarCard(
                     post = post,
                     livePhotoSaveMode = uiState.livePhotoSaveMode,
+                    videoSubtitleRemoveMode = uiState.videoSubtitleRemoveMode,
                     onChangeLiveMode = onChangeLiveMode,
+                    onChangeSubtitleRemoveMode = onChangeSubtitleRemoveMode,
                     onSelectAll = onSelectAll,
                     onSelectOnlyLive = onSelectOnlyLive,
                     onSelectOnlyImages = onSelectOnlyImages,
@@ -283,6 +290,7 @@ private fun DualPaneInnerLayout(
     onClearSelection: () -> Unit,
     onSelectQuality: (String, String) -> Unit,
     onChangeLiveMode: (LivePhotoSaveMode) -> Unit,
+    onChangeSubtitleRemoveMode: (VideoSubtitleRemoveMode) -> Unit,
     onOpenPreview: (MediaItem) -> Unit,
     onDownloadSelected: () -> Unit,
     modifier: Modifier = Modifier
@@ -421,7 +429,9 @@ private fun DualPaneInnerLayout(
                     PostSummaryAndToolbarCard(
                         post = post,
                         livePhotoSaveMode = uiState.livePhotoSaveMode,
+                        videoSubtitleRemoveMode = uiState.videoSubtitleRemoveMode,
                         onChangeLiveMode = onChangeLiveMode,
+                        onChangeSubtitleRemoveMode = onChangeSubtitleRemoveMode,
                         onSelectAll = onSelectAll,
                         onSelectOnlyLive = onSelectOnlyLive,
                         onSelectOnlyImages = onSelectOnlyImages,
@@ -746,7 +756,9 @@ private fun LinkInputCard(
 private fun PostSummaryAndToolbarCard(
     post: ExtractedPost,
     livePhotoSaveMode: LivePhotoSaveMode,
+    videoSubtitleRemoveMode: VideoSubtitleRemoveMode,
     onChangeLiveMode: (LivePhotoSaveMode) -> Unit,
+    onChangeSubtitleRemoveMode: (VideoSubtitleRemoveMode) -> Unit,
     onSelectAll: () -> Unit,
     onSelectOnlyLive: () -> Unit,
     onSelectOnlyImages: () -> Unit,
@@ -856,6 +868,16 @@ private fun PostSummaryAndToolbarCard(
                     label = "实况策略: ${livePhotoSaveMode.label} (点此切换)",
                     selected = true,
                     onClick = { onChangeLiveMode(nextMode) }
+                )
+            }
+
+            if (post.videoCount > 0) {
+                val subEntries = VideoSubtitleRemoveMode.entries
+                val nextSubMode = subEntries[(subEntries.indexOf(videoSubtitleRemoveMode) + 1) % subEntries.size]
+                SelectableChip(
+                    label = "去字幕: ${videoSubtitleRemoveMode.label} (点此切换)",
+                    selected = videoSubtitleRemoveMode != VideoSubtitleRemoveMode.OFF,
+                    onClick = { onChangeSubtitleRemoveMode(nextSubMode) }
                 )
             }
 

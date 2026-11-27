@@ -1,20 +1,31 @@
 package com.foldmedia.app.ui.components
 
+import android.Manifest
 import android.annotation.SuppressLint
+import android.app.AlertDialog
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.net.Uri
 import android.os.Environment
+import android.os.Message
 import android.provider.MediaStore
 import android.webkit.CookieManager
+import android.webkit.JsResult
+import android.webkit.PermissionRequest
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -30,11 +41,13 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.QrCodeScanner
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -114,6 +127,32 @@ fun PlatformLoginDialog(
     var useDesktopQr by remember(platform) { mutableStateOf(supportsQrDesktop) }
     var isSessionReady by remember(platform) { mutableStateOf(cookieVault.hasCookie(platform)) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var canGoBack by remember { mutableStateOf(false) }
+    var pendingPermissionRequest by remember { mutableStateOf<PermissionRequest?>(null) }
+    var pendingFileCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val req = pendingPermissionRequest
+        pendingPermissionRequest = null
+        if (req != null) {
+            if (granted) {
+                runCatching { req.grant(req.resources) }.onFailure { req.deny() }
+            } else {
+                req.deny()
+                Toast.makeText(context, "未授予相机权限，无法在页内完成刷脸验证", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    val fileChooserLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        val cb = pendingFileCallback
+        pendingFileCallback = null
+        cb?.onReceiveValue(if (uri != null) arrayOf(uri) else null)
+    }
 
     LaunchedEffect(platform) {
         while (true) {
@@ -212,6 +251,20 @@ fun PlatformLoginDialog(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                if (canGoBack) {
+                    QuickLoginActionPill(
+                        icon = Icons.AutoMirrored.Rounded.ArrowBack,
+                        label = "返回",
+                        highlighted = false,
+                        onClick = { webViewRef?.goBack() }
+                    )
+                }
+                QuickLoginActionPill(
+                    icon = Icons.Rounded.Refresh,
+                    label = "刷新",
+                    highlighted = false,
+                    onClick = { webViewRef?.reload() }
+                )
                 if (supportsQrDesktop) {
                     QuickLoginActionPill(
                         icon = Icons.Rounded.QrCode2,
@@ -270,6 +323,10 @@ fun PlatformLoginDialog(
                         settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
+                            databaseEnabled = true
+                            mediaPlaybackRequiresUserGesture = false
+                            javaScriptCanOpenWindowsAutomatically = true
+                            setSupportMultipleWindows(true)
                             useWideViewPort = useDesktopQr
                             loadWithOverviewMode = useDesktopQr
                             setSupportZoom(true)
@@ -277,6 +334,113 @@ fun PlatformLoginDialog(
                             displayZoomControls = false
                             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                             userAgentString = if (useDesktopQr) DESKTOP_QR_UA else MOBILE_UA
+                        }
+                        webChromeClient = object : WebChromeClient() {
+                            override fun onPermissionRequest(request: PermissionRequest?) {
+                                if (request == null) return
+                                val needsCamera = request.resources.any {
+                                    it == PermissionRequest.RESOURCE_VIDEO_CAPTURE
+                                }
+                                if (needsCamera) {
+                                    val granted = ContextCompat.checkSelfPermission(
+                                        ctx,
+                                        Manifest.permission.CAMERA
+                                    ) == PackageManager.PERMISSION_GRANTED
+                                    if (granted) {
+                                        runCatching { request.grant(request.resources) }
+                                            .onFailure { request.deny() }
+                                    } else {
+                                        pendingPermissionRequest?.deny()
+                                        pendingPermissionRequest = request
+                                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                    }
+                                } else {
+                                    runCatching { request.grant(request.resources) }
+                                        .onFailure { request.deny() }
+                                }
+                            }
+
+                            override fun onPermissionRequestCanceled(request: PermissionRequest?) {
+                                if (pendingPermissionRequest == request) {
+                                    pendingPermissionRequest = null
+                                }
+                            }
+
+                            override fun onCreateWindow(
+                                view: WebView?,
+                                isDialog: Boolean,
+                                isUserGesture: Boolean,
+                                resultMsg: Message?
+                            ): Boolean {
+                                val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
+                                val tempWebView = WebView(ctx).apply {
+                                    webViewClient = object : WebViewClient() {
+                                        override fun shouldOverrideUrlLoading(
+                                            popupView: WebView?,
+                                            request: WebResourceRequest?
+                                        ): Boolean {
+                                            val popupUri = request?.url ?: return false
+                                            val scheme = popupUri.scheme?.lowercase().orEmpty()
+                                            if (scheme == "http" || scheme == "https") {
+                                                view?.loadUrl(popupUri.toString())
+                                            } else {
+                                                handleExternalAuthUri(ctx, popupUri, view)
+                                            }
+                                            popupView?.destroy()
+                                            return true
+                                        }
+                                    }
+                                }
+                                transport.webView = tempWebView
+                                resultMsg.sendToTarget()
+                                return true
+                            }
+
+                            override fun onShowFileChooser(
+                                webView: WebView?,
+                                filePathCallback: ValueCallback<Array<Uri>>?,
+                                fileChooserParams: FileChooserParams?
+                            ): Boolean {
+                                pendingFileCallback?.onReceiveValue(null)
+                                pendingFileCallback = filePathCallback
+                                val mime = fileChooserParams?.acceptTypes?.firstOrNull { it.isNotBlank() } ?: "*/*"
+                                runCatching {
+                                    fileChooserLauncher.launch(mime)
+                                }.onFailure {
+                                    pendingFileCallback = null
+                                    filePathCallback?.onReceiveValue(null)
+                                }
+                                return true
+                            }
+
+                            override fun onJsAlert(
+                                view: WebView?,
+                                url: String?,
+                                message: String?,
+                                result: JsResult?
+                            ): Boolean {
+                                AlertDialog.Builder(ctx)
+                                    .setMessage(message.orEmpty())
+                                    .setPositiveButton("确定") { _, _ -> result?.confirm() }
+                                    .setOnCancelListener { result?.cancel() }
+                                    .show()
+                                return true
+                            }
+
+                            override fun onJsConfirm(
+                                view: WebView?,
+                                url: String?,
+                                message: String?,
+                                result: JsResult?
+                            ): Boolean {
+                                AlertDialog.Builder(ctx)
+                                    .setMessage(message.orEmpty())
+                                    .setPositiveButton("确定") { _, _ -> result?.confirm() }
+                                    .setNegativeButton("取消") { _, _ -> result?.cancel() }
+                                    .setOnCancelListener { result?.cancel() }
+                                    .show()
+                                return true
+                            }
                         }
                         webViewClient = object : WebViewClient() {
                             override fun shouldOverrideUrlLoading(
@@ -286,18 +450,32 @@ fun PlatformLoginDialog(
                                 val uri = request?.url ?: return false
                                 val scheme = uri.scheme?.lowercase() ?: return false
                                 if (scheme == "http" || scheme == "https") return false
-                                return handleExternalAuthUri(ctx, uri)
+                                return handleExternalAuthUri(ctx, uri, view)
                             }
 
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
+                                canGoBack = view?.canGoBack() == true
                                 cm.flush()
                                 isSessionReady = cookieVault.hasCookie(platform)
-                                if (platform == PlatformType.DOUYIN && useDesktopQr && !isSessionReady) {
+                                val currentUrl = url.orEmpty().lowercase()
+                                val isDouyinHome = platform == PlatformType.DOUYIN &&
+                                    useDesktopQr &&
+                                    !isSessionReady &&
+                                    currentUrl.contains("douyin.com") &&
+                                    !currentUrl.contains("verify") &&
+                                    !currentUrl.contains("captcha") &&
+                                    !currentUrl.contains("passport") &&
+                                    !currentUrl.contains("sso") &&
+                                    !currentUrl.contains("login")
+                                if (isDouyinHome) {
                                     view?.evaluateJavascript(
                                         """
                                         (function(){
+                                            if (window.__FOLD_LOGIN_CLICKED__) return;
                                             setTimeout(function(){
+                                                var qrExists = document.querySelector('img[src*="qrcode"], img[src*="qr"], canvas[class*="qr"]');
+                                                if (qrExists) return;
                                                 var btn = document.querySelector('button[class*="login"], [id*="login-button"]');
                                                 if (!btn) {
                                                     var els = document.querySelectorAll('button, a, div');
@@ -308,7 +486,10 @@ fun PlatformLoginDialog(
                                                         }
                                                     }
                                                 }
-                                                if (btn) btn.click();
+                                                if (btn) {
+                                                    window.__FOLD_LOGIN_CLICKED__ = true;
+                                                    btn.click();
+                                                }
                                             }, 1000);
                                         })();
                                         """.trimIndent(),
@@ -364,11 +545,13 @@ private fun QuickLoginActionPill(
     }
 }
 
-private fun handleExternalAuthUri(context: Context, uri: Uri): Boolean {
+private fun handleExternalAuthUri(context: Context, uri: Uri, webView: WebView? = null): Boolean {
     val scheme = uri.scheme?.lowercase().orEmpty()
+    var fallbackUrl: String? = null
     val targetIntent = runCatching {
         if (scheme == "intent") {
             Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME).apply {
+                fallbackUrl = getStringExtra("browser_fallback_url")
                 removeExtra("browser_fallback_url")
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
@@ -384,7 +567,12 @@ private fun handleExternalAuthUri(context: Context, uri: Uri): Boolean {
         true
     }.getOrDefault(false)
     if (!launched) {
-        Toast.makeText(context, "本机未找到可直接处理的授权组件", Toast.LENGTH_SHORT).show()
+        val fb = fallbackUrl
+        if (!fb.isNullOrBlank() && (fb.startsWith("http://") || fb.startsWith("https://")) && webView != null) {
+            webView.loadUrl(fb)
+        } else {
+            Toast.makeText(context, "本机未找到可直接处理的授权组件", Toast.LENGTH_SHORT).show()
+        }
     }
     return true
 }

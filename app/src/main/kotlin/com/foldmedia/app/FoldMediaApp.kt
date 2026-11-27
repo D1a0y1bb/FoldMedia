@@ -6,6 +6,7 @@ import com.foldmedia.app.media.GalleryMediaSaver
 import com.foldmedia.app.parser.MediaExtractorRepository
 import com.foldmedia.app.parser.WebViewBridgeExtractor
 import com.foldmedia.app.storage.CookieVault
+import com.foldmedia.app.update.AppUpdateManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -31,6 +32,7 @@ class FoldMediaApp : Application() {
     val ytDlpEngine: YtDlpEngine by lazy { YtDlpEngine(this) }
     val webViewBridge: WebViewBridgeExtractor by lazy { WebViewBridgeExtractor(this) }
     val mediaSaver: GalleryMediaSaver by lazy { GalleryMediaSaver(this) }
+    val appUpdateManager: AppUpdateManager by lazy { AppUpdateManager(this, okHttpClient) }
 
     val extractorRepository: MediaExtractorRepository by lazy {
         MediaExtractorRepository(
