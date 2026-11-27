@@ -307,7 +307,8 @@ private fun InlineVideoPlayer(
         factory = { ctx ->
             VideoView(ctx).apply {
                 videoViewRef = this
-                setVideoURI(Uri.parse(videoUrl))
+                val headers = buildStreamHeaders(videoUrl)
+                setVideoURI(Uri.parse(videoUrl), headers)
                 setOnPreparedListener { mp ->
                     mp.isLooping = true
                     start()
@@ -316,12 +317,22 @@ private fun InlineVideoPlayer(
         },
         update = { view ->
             if (!view.isPlaying) {
-                view.setVideoURI(Uri.parse(videoUrl))
+                view.setVideoURI(Uri.parse(videoUrl), buildStreamHeaders(videoUrl))
                 view.start()
             }
         },
         modifier = modifier
     )
+}
+
+private fun buildStreamHeaders(url: String): Map<String, String> = when {
+    url.contains("douyin", ignoreCase = true) || url.contains("amemv", ignoreCase = true) ->
+        mapOf("Referer" to "https://www.douyin.com/")
+    url.contains("xhscdn", ignoreCase = true) || url.contains("xiaohongshu", ignoreCase = true) ->
+        mapOf("Referer" to "https://www.xiaohongshu.com/")
+    url.contains("twimg", ignoreCase = true) ->
+        mapOf("Referer" to "https://x.com/")
+    else -> emptyMap()
 }
 
 @Composable

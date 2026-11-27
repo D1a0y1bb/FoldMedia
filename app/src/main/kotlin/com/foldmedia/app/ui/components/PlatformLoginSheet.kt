@@ -69,6 +69,7 @@ fun PlatformType.nativeAppPackage(): String? = when (this) {
     PlatformType.XIAOHONGSHU -> "com.xingin.xhs"
     PlatformType.X_TWITTER -> "com.twitter.android"
     PlatformType.YOUTUBE -> "com.google.android.youtube"
+    PlatformType.WECHAT -> "com.tencent.mm"
     PlatformType.UNKNOWN -> null
 }
 

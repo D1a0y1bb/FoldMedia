@@ -9,6 +9,7 @@ import com.foldmedia.app.model.LivePhotoSaveMode
 import com.foldmedia.app.model.MediaItem
 import com.foldmedia.app.model.MediaKind
 import com.foldmedia.app.model.PlatformType
+import com.foldmedia.app.parser.LinkSanitizer
 import com.foldmedia.app.parser.MediaExtractorRepository
 import com.foldmedia.app.storage.CookieVault
 import kotlinx.coroutines.CoroutineScope
@@ -202,22 +203,36 @@ class DownloadManagerCoordinator(
     ) {
         val tempDir = File(appContext.cacheDir, "dl_job_$taskId").apply { mkdirs() }
         try {
-            if (item.requiresYtDlpDownload) {
-                val url = item.videoUrl ?: post.resolvedUrl
-                val selectedQuality = item.qualityOptions.firstOrNull { it.id == item.selectedQualityId }
-                    ?: item.qualityOptions.firstOrNull()
+            val selectedQuality = item.qualityOptions.firstOrNull { it.id == item.selectedQualityId }
+                ?: item.qualityOptions.firstOrNull()
+            val selector = selectedQuality?.formatSelector.orEmpty()
+            val explicitDirectUrl = selector.takeIf { it.startsWith("direct:") }?.removePrefix("direct:")
+            val hlsOverrideUrl = when {
+                selector.startsWith("hls_merge:") -> selector.removePrefix("hls_merge:")
+                selector.startsWith("hls_audio:") -> selector.removePrefix("hls_audio:")
+                else -> null
+            }
+            val effectiveTargetUrl = explicitDirectUrl ?: hlsOverrideUrl ?: item.videoUrl ?: post.resolvedUrl
+            val useYtDlp = explicitDirectUrl == null && (
+                item.requiresYtDlpDownload ||
+                    hlsOverrideUrl != null ||
+                    LinkSanitizer.isHlsStreamUrl(effectiveTargetUrl)
+                )
+
+            if (useYtDlp) {
                 val cookieFile = cookieVault.exportNetscapeCookieFile(post.platform, appContext.cacheDir)
+                val isHls = LinkSanitizer.isHlsStreamUrl(effectiveTargetUrl) || hlsOverrideUrl != null
 
                 onTaskUpdated(taskId) {
                     it.copy(
                         status = DownloadStatus.DOWNLOADING,
                         progress = 0.05f,
-                        statusMessage = "yt-dlp 解析拉流中..."
+                        statusMessage = if (isHls) "HLS 拉流并 FFmpeg 合并 MP4..." else "yt-dlp 解析拉流中..."
                     )
                 }
 
                 val outFile = ytDlpEngine.downloadMedia(
-                    url = url,
+                    url = effectiveTargetUrl,
                     outputDir = tempDir,
                     qualityOption = selectedQuality,
                     cookieFile = cookieFile
@@ -226,7 +241,7 @@ class DownloadManagerCoordinator(
                         it.copy(
                             status = DownloadStatus.DOWNLOADING,
                             progress = (fraction * 0.9f).coerceIn(0.05f, 0.9f),
-                            statusMessage = msg.ifBlank { "下载视频流..." }
+                            statusMessage = msg.ifBlank { if (isHls) "HLS 分片合成中..." else "下载视频流..." }
                         )
                     }
                 }
@@ -236,7 +251,7 @@ class DownloadManagerCoordinator(
                 }
 
                 val baseName = "${post.platform.shortBadge}_${post.title}_${post.id}"
-                val saved = if (selectedQuality?.isAudioOnly == true) {
+                val saved = if (selectedQuality?.isAudioOnly == true || item.kind == MediaKind.AUDIO) {
                     mediaSaver.saveAudioFile(outFile, baseName)
                 } else {
                     mediaSaver.saveVideoFile(outFile, baseName)
@@ -252,16 +267,23 @@ class DownloadManagerCoordinator(
                 }
             } else {
                 val candidates = buildList {
-                    item.videoUrl?.let { add(it) }
-                    addAll(item.backupVideoUrls)
-                }
-                if (candidates.isEmpty()) throw IllegalStateException("缺少视频流地址")
+                    if (explicitDirectUrl != null) add(explicitDirectUrl)
+                    item.videoUrl?.let { if (!LinkSanitizer.isHlsStreamUrl(it)) add(it) }
+                    item.backupVideoUrls.filterNot(LinkSanitizer::isHlsStreamUrl).forEach { add(it) }
+                }.distinct()
+                if (candidates.isEmpty()) throw IllegalStateException("缺少视频直链地址")
 
+                val isAudio = item.kind == MediaKind.AUDIO || selectedQuality?.isAudioOnly == true
                 onTaskUpdated(taskId) {
-                    it.copy(status = DownloadStatus.DOWNLOADING, progress = 0.05f, statusMessage = "高速下载无水印视频...")
+                    it.copy(
+                        status = DownloadStatus.DOWNLOADING,
+                        progress = 0.05f,
+                        statusMessage = if (isAudio) "高速下载音频..." else "高速下载无水印视频..."
+                    )
                 }
 
-                val tmpFile = File(tempDir, "video_${post.id}_${item.index}.mp4")
+                val ext = if (isAudio) "mp3" else "mp4"
+                val tmpFile = File(tempDir, "media_${post.id}_${item.index}.$ext")
                 downloadFirstAvailableToFile(candidates, post.platform, tmpFile) { progress ->
                     onTaskUpdated(taskId) {
                         it.copy(
@@ -276,7 +298,12 @@ class DownloadManagerCoordinator(
                     it.copy(status = DownloadStatus.SAVING_TO_GALLERY, progress = 0.95f, statusMessage = "写入系统相册...")
                 }
 
-                val saved = mediaSaver.saveVideoFile(tmpFile, "${post.platform.shortBadge}_${post.title}_${post.id}")
+                val baseName = "${post.platform.shortBadge}_${post.title}_${post.id}"
+                val saved = if (isAudio) {
+                    mediaSaver.saveAudioFile(tmpFile, baseName)
+                } else {
+                    mediaSaver.saveVideoFile(tmpFile, baseName)
+                }
                 onTaskUpdated(taskId) {
                     it.copy(
                         status = DownloadStatus.COMPLETED,
@@ -294,11 +321,20 @@ class DownloadManagerCoordinator(
     private suspend fun downloadFirstAvailableBytes(urls: List<String>, platform: PlatformType): ByteArray {
         var lastError: Throwable? = null
         for (url in urls) {
-            val res = runCatching { extractorRepository.downloadBinaryBytes(url, platform) }
+            val res = runCatching {
+                val bytes = extractorRepository.downloadBinaryBytes(url, platform)
+                require(bytes.size > 512 && !looksLikeHtml(bytes)) { "返回内容不是有效 MP4 视频流" }
+                bytes
+            }
             if (res.isSuccess) return res.getOrThrow()
             lastError = res.exceptionOrNull()
         }
-        throw lastError ?: IllegalStateException("所有视频备用源均下载失败")
+        throw lastError ?: IllegalStateException("所有实况动态流备用源均下载失败")
+    }
+
+    private fun looksLikeHtml(bytes: ByteArray): Boolean {
+        val head = String(bytes, 0, minOf(bytes.size, 64), Charsets.UTF_8).trimStart().lowercase()
+        return head.startsWith("<!doctype") || head.startsWith("<html") || head.startsWith("{")
     }
 
     private fun downloadFirstAvailableToFile(
@@ -321,6 +357,8 @@ class DownloadManagerCoordinator(
                         if (cookie.isNotBlank()) header("Cookie", cookie)
                         if (platform == PlatformType.DOUYIN) header("Referer", "https://www.douyin.com/")
                         if (platform == PlatformType.XIAOHONGSHU) header("Referer", "https://www.xiaohongshu.com/")
+                        if (platform == PlatformType.X_TWITTER) header("Referer", "https://x.com/")
+                        if (platform == PlatformType.WECHAT) header("Referer", "https://mp.weixin.qq.com/")
                     }
                     .build()
 

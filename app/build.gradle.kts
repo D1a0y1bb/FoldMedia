@@ -22,8 +22,8 @@ android {
     applicationId = "com.foldmedia.app"
     minSdk = 33
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0.0"
+    versionCode = 2
+    versionName = "1.0.1"
   }
 
   signingConfigs {
@@ -54,7 +54,8 @@ android {
       if (keystorePropertiesFile.exists()) {
         signingConfig = signingConfigs.getByName("release")
       }
-      isMinifyEnabled = false
+      isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }
   }
@@ -122,13 +123,9 @@ dependencies {
   implementation(libs.coil.compose)
   implementation(libs.coil.network.okhttp)
 
-  // On-device Media Engines (yt-dlp + ffmpeg + aria2c)
+  // On-device Media Engines (yt-dlp + ffmpeg)
   implementation(libs.youtubedl.library)
   implementation(libs.youtubedl.ffmpeg)
-  implementation(libs.youtubedl.aria2c)
-
-  // Xiaomi Motion Photo / Live Photo XMP Metadata
-  implementation(libs.xmpcore)
 
   // Unit & Instrumented Tests
   testImplementation(libs.junit)

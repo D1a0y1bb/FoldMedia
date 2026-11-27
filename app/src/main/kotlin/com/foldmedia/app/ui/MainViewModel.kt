@@ -16,6 +16,8 @@ import com.foldmedia.app.model.MediaKind
 import com.foldmedia.app.model.PlatformType
 import com.foldmedia.app.parser.LinkSanitizer
 import com.foldmedia.app.ui.fold.FoldPreviewOverride
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,6 +29,7 @@ data class MainUiState(
     val urlInput: String = "",
     val detectedPlatform: PlatformType = PlatformType.UNKNOWN,
     val isExtracting: Boolean = false,
+    val extractStageText: String = "本地引擎解析中...",
     val extractError: String? = null,
     val currentPost: ExtractedPost? = null,
     val historyPosts: List<ExtractedPost> = emptyList(),
@@ -69,6 +72,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
     val ytDlpStatus: StateFlow<YtDlpEngine.EngineStatus> = ytDlpEngine.status
+    private var extractJob: Job? = null
 
     init {
         refreshCookieStatuses()
@@ -122,19 +126,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun extractCurrentUrl() {
         val raw = _uiState.value.urlInput.trim()
         if (raw.isBlank()) {
-            _uiState.update { it.copy(extractError = "请先粘贴抖音、小红书、X 或 YouTube 的分享文本/链接") }
+            _uiState.update { it.copy(extractError = "请先粘贴抖音、小红书、微信公众号/贴图、X 或 YouTube 链接") }
             return
         }
         if (_uiState.value.isExtracting) return
 
-        viewModelScope.launch {
-            _uiState.update { it.copy(isExtracting = true, extractError = null, statusNotice = null) }
-            val result = runCatching { repository.extract(raw) }
+        extractJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isExtracting = true,
+                    extractStageText = "正在识别链接...",
+                    extractError = null,
+                    statusNotice = null
+                )
+            }
+            val result = runCatching {
+                repository.extract(raw) { stage ->
+                    _uiState.update { it.copy(extractStageText = stage) }
+                }
+            }
             result.onSuccess { post ->
                 _uiState.update { state ->
                     val updatedHistory = listOf(post) + state.historyPosts.filterNot { it.id == post.id && it.platform == post.platform }.take(14)
                     state.copy(
                         isExtracting = false,
+                        extractStageText = "本地引擎解析中...",
                         currentPost = post,
                         historyPosts = updatedHistory,
                         detectedPlatform = post.platform,
@@ -143,13 +159,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             }.onFailure { err ->
-                _uiState.update {
-                    it.copy(
-                        isExtracting = false,
-                        extractError = err.message ?: "解析失败，请检查网络或尝试登录对应平台"
-                    )
+                if (err is CancellationException) {
+                    _uiState.update {
+                        it.copy(
+                            isExtracting = false,
+                            extractStageText = "本地引擎解析中..."
+                        )
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            isExtracting = false,
+                            extractStageText = "本地引擎解析中...",
+                            extractError = err.message ?: "解析失败，请检查网络或尝试登录对应平台"
+                        )
+                    }
                 }
             }
+        }
+    }
+
+    fun cancelExtraction() {
+        extractJob?.cancel()
+        extractJob = null
+        _uiState.update {
+            it.copy(
+                isExtracting = false,
+                extractStageText = "本地引擎解析中...",
+                statusNotice = "已取消当前解析"
+            )
         }
     }
 

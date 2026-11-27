@@ -1,18 +1,19 @@
 package com.foldmedia.app.engine
 
 import android.content.Context
+import android.net.ConnectivityManager
 import android.util.Log
 import com.foldmedia.app.model.ExtractedPost
 import com.foldmedia.app.model.MediaItem
 import com.foldmedia.app.model.MediaKind
 import com.foldmedia.app.model.PlatformType
 import com.foldmedia.app.model.QualityOption
-import com.yausername.aria2c.Aria2c
+import com.foldmedia.app.parser.LinkSanitizer
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDL.UpdateChannel
 import com.yausername.youtubedl_android.YoutubeDLRequest
-import com.yausername.youtubedl_android.mapper.VideoInfo
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,10 +21,20 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 
 /**
- * Wraps the on-device `youtubedl-android` runtime (`yt-dlp` + `ffmpeg` + `aria2c`)
+ * Wraps the on-device `youtubedl-android` runtime (`yt-dlp` + `ffmpeg`)
  * for Scheme A (100% local execution without any external parsing server).
  */
 class YtDlpEngine(private val appContext: Context) {
@@ -33,7 +44,6 @@ class YtDlpEngine(private val appContext: Context) {
         val initializing: Boolean = false,
         val version: String = "未初始化",
         val ffmpegReady: Boolean = false,
-        val aria2cReady: Boolean = false,
         val lastError: String? = null
     )
 
@@ -49,15 +59,14 @@ class YtDlpEngine(private val appContext: Context) {
             return@withLock try {
                 YoutubeDL.getInstance().init(appContext)
                 val ffmpegOk = runCatching { FFmpeg.getInstance().init(appContext) }.isSuccess
-                val ariaOk = runCatching { Aria2c.getInstance().init(appContext) }.isSuccess
-                val ver = runCatching { YoutubeDL.getInstance().version(appContext) }.getOrNull()
+                val ver = runCatching { YoutubeDL.getInstance().version(appContext)?.takeIf { it.isNotBlank() } }.getOrNull()
+                    ?: runCatching { YoutubeDL.getInstance().versionName(appContext)?.takeIf { it.isNotBlank() } }.getOrNull()
                     ?: "已就绪"
                 _status.value = EngineStatus(
                     initialized = true,
                     initializing = false,
                     version = ver,
-                    ffmpegReady = ffmpegOk,
-                    aria2cReady = ariaOk
+                    ffmpegReady = ffmpegOk
                 )
                 true
             } catch (t: Throwable) {
@@ -80,7 +89,9 @@ class YtDlpEngine(private val appContext: Context) {
         runCatching {
             val channel = if (useNightly) UpdateChannel.NIGHTLY else UpdateChannel.STABLE
             val updateStatus = YoutubeDL.getInstance().updateYoutubeDL(appContext, channel)
-            val ver = runCatching { YoutubeDL.getInstance().version(appContext) }.getOrNull() ?: "已更新"
+            val ver = runCatching { YoutubeDL.getInstance().version(appContext)?.takeIf { it.isNotBlank() } }.getOrNull()
+                ?: runCatching { YoutubeDL.getInstance().versionName(appContext)?.takeIf { it.isNotBlank() } }.getOrNull()
+                ?: "已更新"
             _status.value = _status.value.copy(version = ver, lastError = null)
             when (updateStatus) {
                 YoutubeDL.UpdateStatus.DONE -> "已更新到最新版 ($ver)"
@@ -94,34 +105,65 @@ class YtDlpEngine(private val appContext: Context) {
         url: String,
         originalInput: String,
         platform: PlatformType,
-        cookieFile: File? = null
+        cookieFile: File? = null,
+        timeoutMs: Long = 30_000L
     ): ExtractedPost = withContext(Dispatchers.IO) {
         check(ensureInitialized()) { "本地 yt-dlp 引擎初始化失败: ${_status.value.lastError.orEmpty()}" }
 
+        val processId = "extract_${System.nanoTime()}"
         val request = YoutubeDLRequest(url).apply {
+            addOption("--dump-json")
             addOption("--no-playlist")
             addOption("--no-warnings")
+            addOption("--socket-timeout", "12")
+            addOption("--retries", "1")
+            addOption("--extractor-retries", "1")
+            resolveSystemProxyUrl()?.let { proxyUrl ->
+                addOption("--proxy", proxyUrl)
+            }
             if (cookieFile != null && cookieFile.exists()) {
                 addOption("--cookies", cookieFile.absolutePath)
             }
         }
-        val info: VideoInfo = YoutubeDL.getInstance().getInfo(request)
-        val qualities = buildQualityOptions(info)
-        val title = info.title?.takeIf { it.isNotBlank() } ?: "${platform.displayName} 视频"
-        val caption = info.description.orEmpty()
-        val uploader = info.uploader.orEmpty()
-        val thumb = info.thumbnail
-        val durationMs = (info.duration.toLong().coerceAtLeast(0L)) * 1000L
+
+        val jsonRoot: JsonObject = try {
+            withTimeout(timeoutMs) {
+                val response = YoutubeDL.getInstance().execute(request, processId)
+                val jsonOut = response.out.trim()
+                check(jsonOut.isNotBlank()) { response.err.ifBlank { "yt-dlp 未返回有效媒体信息" } }
+                val firstJsonLine = jsonOut.lineSequence().firstOrNull { it.trimStart().startsWith("{") } ?: jsonOut
+                lenientJson.parseToJsonElement(firstJsonLine).jsonObject
+            }
+        } catch (ce: CancellationException) {
+            runCatching { YoutubeDL.getInstance().destroyProcessById(processId) }
+            throw ce
+        }
+
+        val infoId = jsonRoot["id"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        val infoWidth = jsonRoot["width"]?.jsonPrimitive?.intOrNull ?: 0
+        val infoHeight = jsonRoot["height"]?.jsonPrimitive?.intOrNull ?: 0
+        val formatHeights = (jsonRoot["formats"] as? JsonArray).orEmpty()
+            .mapNotNull { (it as? JsonObject)?.get("height")?.jsonPrimitive?.intOrNull }
+            .filter { it > 0 }
+        val maxHeight = formatHeights.maxOrNull() ?: infoHeight
+        val qualities = buildQualityOptions(maxHeight)
+        val title = jsonRoot["title"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+            ?: "${platform.displayName} 视频"
+        val caption = jsonRoot["description"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val uploader = jsonRoot["uploader"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val thumb = jsonRoot["thumbnail"]?.jsonPrimitive?.contentOrNull
+        val durationSec = jsonRoot["duration"]?.jsonPrimitive?.doubleOrNull ?: 0.0
+        val durationMs = (durationSec * 1000.0).toLong().coerceAtLeast(0L)
 
         val videoItem = MediaItem(
-            id = info.id?.takeIf { it.isNotBlank() } ?: "yt_${System.currentTimeMillis()}",
+            id = infoId ?: "yt_${System.currentTimeMillis()}",
             index = 0,
             kind = MediaKind.VIDEO,
             title = title,
             imageUrl = thumb,
             videoUrl = url,
-            width = info.width,
-            height = info.height,
+            width = infoWidth,
+            height = infoHeight,
             durationMs = durationMs,
             isSelected = true,
             qualityOptions = qualities,
@@ -156,35 +198,94 @@ class YtDlpEngine(private val appContext: Context) {
         outputDir.listFiles()?.forEach { it.delete() }
 
         val isAudio = qualityOption?.isAudioOnly == true
-        val formatSelector = qualityOption?.formatSelector
-            ?: "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+        val systemProxy = resolveSystemProxyUrl()
 
-        val request = YoutubeDLRequest(url).apply {
-            addOption("--no-playlist")
-            addOption("-f", formatSelector)
-            if (isAudio) {
-                addOption("-x")
-                addOption("--audio-format", "m4a")
-            } else {
-                addOption("--merge-output-format", "mp4")
+        if (LinkSanitizer.isHlsStreamUrl(url)) {
+            onProgress(0.15f, "FFmpeg 拉取 m3u8 音视频流...")
+            val hlsResult = runCatching {
+                downloadHlsViaFFmpeg(
+                    hlsUrl = url,
+                    outputDir = outputDir,
+                    isAudioOnly = isAudio,
+                    proxyUrl = null, // tun0 VPN or direct network; retry with proxy if needed
+                    onProgress = onProgress
+                )
+            }.recoverCatching { firstErr ->
+                if (!systemProxy.isNullOrBlank()) {
+                    Log.w("YtDlpEngine", "Direct FFmpeg HLS failed, retrying via proxy=$systemProxy", firstErr)
+                    outputDir.listFiles()?.forEach { it.delete() }
+                    downloadHlsViaFFmpeg(
+                        hlsUrl = url,
+                        outputDir = outputDir,
+                        isAudioOnly = isAudio,
+                        proxyUrl = systemProxy,
+                        onProgress = onProgress
+                    )
+                } else {
+                    throw firstErr
+                }
             }
-            if (_status.value.aria2cReady) {
-                addOption("--downloader", "libaria2c.so")
+            if (hlsResult.isSuccess) {
+                return@withContext hlsResult.getOrThrow()
             }
-            if (cookieFile != null && cookieFile.exists()) {
-                addOption("--cookies", cookieFile.absolutePath)
-            }
-            addOption("-o", File(outputDir, "media_%(id)s.%(ext)s").absolutePath)
+            Log.e("YtDlpEngine", "FFmpeg HLS direct merge failed", hlsResult.exceptionOrNull())
+            throw IllegalStateException(
+                "HLS 合并失败: ${hlsResult.exceptionOrNull()?.message ?: "无法读取 m3u8 流"}",
+                hlsResult.exceptionOrNull()
+            )
         }
 
-        YoutubeDL.getInstance().execute(request) { progress, etaInSeconds, line ->
-            val fraction = if (progress >= 0f) (progress / 100f).coerceIn(0f, 1f) else 0f
-            val msg = buildString {
-                if (progress >= 0f) append("${progress.toInt()}%")
-                if (etaInSeconds > 0) append(" · 剩余 ${etaInSeconds}s")
-                if (isEmpty() && !line.isNullOrBlank()) append(line.take(48))
+        val rawSelector = qualityOption?.formatSelector.orEmpty()
+        val primarySelector = when {
+            rawSelector.startsWith("hls_merge:") -> "bestvideo+bestaudio/best"
+            rawSelector.startsWith("hls_audio:") -> "bestaudio/best"
+            rawSelector.isBlank() -> "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
+            else -> rawSelector
+        }
+
+        val processId = "dl_${System.nanoTime()}"
+        val attemptError = runCatching {
+            runYtDlpDownload(
+                url = url,
+                outputDir = outputDir,
+                formatSelector = primarySelector,
+                isAudio = isAudio,
+                cookieFile = cookieFile,
+                proxyUrl = systemProxy,
+                processId = processId,
+                onProgress = onProgress
+            )
+        }.exceptionOrNull()
+
+        if (attemptError != null) {
+            if (attemptError is CancellationException) {
+                runCatching { YoutubeDL.getInstance().destroyProcessById(processId) }
+                throw attemptError
             }
-            onProgress(fraction, msg)
+            Log.e("YtDlpEngine", "Primary download failed (proxy=$systemProxy)", attemptError)
+
+            // Retry once with direct socket (if VPN tun0 already handles routing) and relaxed format selector
+            outputDir.listFiles()?.forEach { it.delete() }
+            val fallbackSelector = if (isAudio) "bestaudio/best" else "bestvideo+bestaudio/best"
+            val retryId = "dl_retry_${System.nanoTime()}"
+            try {
+                runYtDlpDownload(
+                    url = url,
+                    outputDir = outputDir,
+                    formatSelector = fallbackSelector,
+                    isAudio = isAudio,
+                    cookieFile = cookieFile,
+                    proxyUrl = null,
+                    processId = retryId,
+                    onProgress = onProgress
+                )
+            } catch (ce: CancellationException) {
+                runCatching { YoutubeDL.getInstance().destroyProcessById(retryId) }
+                throw ce
+            } catch (retryErr: Throwable) {
+                Log.e("YtDlpEngine", "Retry download failed", retryErr)
+                throw IllegalStateException(formatYtDlpError(retryErr), retryErr)
+            }
         }
 
         val produced = outputDir.listFiles()
@@ -195,11 +296,168 @@ class YtDlpEngine(private val appContext: Context) {
         produced
     }
 
-    private fun buildQualityOptions(info: VideoInfo): List<QualityOption> {
-        val maxHeight = info.formats.orEmpty()
-            .mapNotNull { it.height }
-            .filter { it > 0 }
-            .maxOrNull() ?: info.height
+    private fun runYtDlpDownload(
+        url: String,
+        outputDir: File,
+        formatSelector: String,
+        isAudio: Boolean,
+        cookieFile: File?,
+        proxyUrl: String?,
+        processId: String,
+        onProgress: (Float, String) -> Unit
+    ) {
+        val request = YoutubeDLRequest(url).apply {
+            addOption("--no-playlist")
+            addOption("--no-warnings")
+            addOption("--downloader", "m3u8:ffmpeg")
+            addOption("--socket-timeout", "20")
+            addOption("--retries", "2")
+            addOption("-f", formatSelector)
+            if (!proxyUrl.isNullOrBlank()) {
+                addOption("--proxy", proxyUrl)
+            }
+            if (isAudio) {
+                addOption("-x")
+                addOption("--audio-format", "m4a")
+            } else {
+                addOption("--merge-output-format", "mp4")
+                addOption("--remux-video", "mp4")
+            }
+            if (cookieFile != null && cookieFile.exists()) {
+                addOption("--cookies", cookieFile.absolutePath)
+            }
+            addOption("-o", File(outputDir, "media_%(id)s.%(ext)s").absolutePath)
+        }
+
+        YoutubeDL.getInstance().execute(request, processId) { progress, etaInSeconds, line ->
+            val fraction = if (progress >= 0f) (progress / 100f).coerceIn(0f, 1f) else 0f
+            val msg = buildString {
+                if (progress >= 0f) append("${progress.toInt()}%")
+                if (etaInSeconds > 0) append(" · 剩余 ${etaInSeconds}s")
+                if (isEmpty() && !line.isNullOrBlank()) append(line.take(48))
+            }
+            onProgress(fraction, msg)
+        }
+    }
+
+    private fun formatYtDlpError(err: Throwable): String {
+        val raw = err.message.orEmpty()
+        val errorLines = raw.lines()
+            .map { it.trim() }
+            .filter { it.isNotBlank() && !it.startsWith("WARNING:", ignoreCase = true) }
+        return errorLines.firstOrNull { it.startsWith("ERROR:", ignoreCase = true) }
+            ?: errorLines.lastOrNull()
+            ?: raw.ifBlank { "yt-dlp 下载失败" }
+    }
+
+    private fun downloadHlsViaFFmpeg(
+        hlsUrl: String,
+        outputDir: File,
+        isAudioOnly: Boolean,
+        proxyUrl: String?,
+        onProgress: (Float, String) -> Unit
+    ): File {
+        val ffmpegBin = File(appContext.applicationInfo.nativeLibraryDir, "libffmpeg.so")
+        check(ffmpegBin.exists()) { "未找到内置 libffmpeg.so" }
+
+        val packagesDir = File(appContext.noBackupFilesDir, "youtubedl-android/packages")
+        val ldPath = listOf(
+            File(packagesDir, "python/usr/lib").absolutePath,
+            File(packagesDir, "ffmpeg/usr/lib").absolutePath
+        ).joinToString(":")
+        val sslCert = File(packagesDir, "python/usr/etc/tls/cert.pem").absolutePath
+
+        val outExt = if (isAudioOnly) "m4a" else "mp4"
+        val outFile = File(outputDir, "hls_merged_${System.currentTimeMillis()}.$outExt")
+
+        fun runFfmpeg(useAacBsf: Boolean): Pair<Int, String> {
+            if (outFile.exists()) outFile.delete()
+            val cmd = buildList {
+                add(ffmpegBin.absolutePath)
+                add("-y")
+                add("-loglevel")
+                add("error")
+                add("-user_agent")
+                add("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+                if (hlsUrl.contains("twimg.com", ignoreCase = true)) {
+                    add("-headers")
+                    add("Referer: https://x.com/\r\n")
+                }
+                add("-i")
+                add(hlsUrl)
+                if (isAudioOnly) {
+                    add("-vn")
+                    add("-c:a")
+                    add("aac")
+                    add("-b:a")
+                    add("192k")
+                } else {
+                    add("-c")
+                    add("copy")
+                    if (useAacBsf) {
+                        add("-bsf:a")
+                        add("aac_adtstoasc")
+                    }
+                    add("-movflags")
+                    add("+faststart")
+                }
+                add(outFile.absolutePath)
+            }
+            val pb = ProcessBuilder(cmd).redirectErrorStream(true)
+            pb.environment().apply {
+                put("LD_LIBRARY_PATH", ldPath)
+                put("SSL_CERT_FILE", sslCert)
+                if (!proxyUrl.isNullOrBlank()) {
+                    put("http_proxy", proxyUrl)
+                    put("https_proxy", proxyUrl)
+                    put("HTTP_PROXY", proxyUrl)
+                    put("HTTPS_PROXY", proxyUrl)
+                }
+            }
+            val process = pb.start()
+            val stderr = process.inputStream.bufferedReader().readText()
+            val exitCode = process.waitFor()
+            return exitCode to stderr
+        }
+
+        onProgress(0.45f, if (isAudioOnly) "FFmpeg 提取音频中..." else "FFmpeg 合并音视频为 MP4...")
+        var (exitCode, stderr) = runFfmpeg(useAacBsf = !isAudioOnly)
+        if ((exitCode != 0 || !outFile.exists() || outFile.length() == 0L) && !isAudioOnly) {
+            Log.w("YtDlpEngine", "FFmpeg with aac_adtstoasc failed ($exitCode): $stderr; retrying plain copy")
+            val second = runFfmpeg(useAacBsf = false)
+            exitCode = second.first
+            stderr = second.second
+        }
+        if (exitCode != 0 || !outFile.exists() || outFile.length() == 0L) {
+            throw IllegalStateException(stderr.lineSequence().lastOrNull { it.isNotBlank() } ?: "FFmpeg 退出码 $exitCode")
+        }
+        onProgress(0.95f, "HLS 合并完成")
+        return outFile
+    }
+
+    internal fun resolveSystemProxyUrl(): String? {
+        runCatching {
+            val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            val proxyInfo = cm?.defaultProxy
+            val host = proxyInfo?.host?.trim()
+            val port = proxyInfo?.port ?: -1
+            if (!host.isNullOrBlank() && port in 1..65535) {
+                return "http://$host:$port"
+            }
+        }
+        val sysHost = System.getProperty("https.proxyHost")
+            ?.takeIf { it.isNotBlank() }
+            ?: System.getProperty("http.proxyHost")?.takeIf { it.isNotBlank() }
+        val sysPort = System.getProperty("https.proxyPort")?.toIntOrNull()
+            ?: System.getProperty("http.proxyPort")?.toIntOrNull()
+            ?: -1
+        if (!sysHost.isNullOrBlank() && sysPort in 1..65535) {
+            return "http://$sysHost:$sysPort"
+        }
+        return null
+    }
+
+    private fun buildQualityOptions(maxHeight: Int): List<QualityOption> {
 
         val options = mutableListOf<QualityOption>()
         if (maxHeight >= 2160) {
@@ -221,13 +479,13 @@ class YtDlpEngine(private val appContext: Context) {
         options += QualityOption(
             id = "fhd_1080",
             label = "1080P 高清 (MP4)",
-            formatSelector = "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]/best",
+            formatSelector = "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
             resolution = "1080p"
         )
         options += QualityOption(
             id = "hd_720",
             label = "720P 流畅省流",
-            formatSelector = "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best",
+            formatSelector = "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/best",
             resolution = "720p"
         )
         options += QualityOption(
@@ -238,5 +496,12 @@ class YtDlpEngine(private val appContext: Context) {
             resolution = "音频"
         )
         return options
+    }
+
+    companion object {
+        private val lenientJson = Json {
+            ignoreUnknownKeys = true
+            isLenient = true
+        }
     }
 }

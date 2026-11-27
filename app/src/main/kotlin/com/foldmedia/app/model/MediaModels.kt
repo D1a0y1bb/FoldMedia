@@ -38,6 +38,13 @@ enum class PlatformType(
         loginUrl = "https://m.youtube.com/",
         cookieDomainHint = "youtube.com"
     ),
+    WECHAT(
+        displayName = "微信公众/贴图",
+        shortBadge = "微信",
+        accentColor = Color(0xFF07C160),
+        loginUrl = "",
+        cookieDomainHint = "weixin.qq.com"
+    ),
     UNKNOWN(
         displayName = "通用链接",
         shortBadge = "通用",

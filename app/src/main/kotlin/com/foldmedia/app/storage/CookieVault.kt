@@ -97,7 +97,7 @@ class CookieVault(context: Context) {
             PlatformType.XIAOHONGSHU -> ".xiaohongshu.com"
             PlatformType.X_TWITTER -> ".x.com"
             PlatformType.YOUTUBE -> ".youtube.com"
-            PlatformType.UNKNOWN -> return null
+            PlatformType.WECHAT, PlatformType.UNKNOWN -> return null
         }
         val file = File(cacheDir, "cookies_${platform.name.lowercase()}.txt")
         val lines = buildString {
@@ -139,7 +139,7 @@ class CookieVault(context: Context) {
             "https://www.youtube.com/",
             "https://accounts.google.com/"
         )
-        PlatformType.UNKNOWN -> emptyList()
+        PlatformType.WECHAT, PlatformType.UNKNOWN -> emptyList()
     }
 
     companion object {
@@ -167,7 +167,7 @@ class CookieVault(context: Context) {
                 PlatformType.DOUYIN -> DOUYIN_AUTH_KEYS
                 PlatformType.X_TWITTER -> X_AUTH_KEYS
                 PlatformType.YOUTUBE -> YOUTUBE_AUTH_KEYS
-                PlatformType.UNKNOWN -> return false
+                PlatformType.WECHAT, PlatformType.UNKNOWN -> return false
             }
             return presentKeys.any { key ->
                 expectedKeys.any { target -> target.equals(key, ignoreCase = false) }

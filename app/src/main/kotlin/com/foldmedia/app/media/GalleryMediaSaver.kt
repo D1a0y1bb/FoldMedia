@@ -179,6 +179,14 @@ class GalleryMediaSaver(private val context: Context) {
 
     private fun detectImageType(bytes: ByteArray, hint: String?): Pair<String, String> {
         if (XiaomiMotionPhotoBuilder.isJpeg(bytes)) return "jpg" to "image/jpeg"
+        if (bytes.size >= 6 &&
+            bytes[0] == 'G'.code.toByte() && bytes[1] == 'I'.code.toByte() && bytes[2] == 'F'.code.toByte() &&
+            bytes[3] == '8'.code.toByte() &&
+            (bytes[4] == '7'.code.toByte() || bytes[4] == '9'.code.toByte()) &&
+            bytes[5] == 'a'.code.toByte()
+        ) {
+            return "gif" to "image/gif"
+        }
         if (bytes.size >= 12 &&
             bytes[0] == 'R'.code.toByte() && bytes[1] == 'I'.code.toByte() &&
             bytes[8] == 'W'.code.toByte() && bytes[9] == 'E'.code.toByte()
@@ -192,6 +200,7 @@ class GalleryMediaSaver(private val context: Context) {
             return "png" to "image/png"
         }
         return when (hint?.lowercase()) {
+            "gif" -> "gif" to "image/gif"
             "png" -> "png" to "image/png"
             "webp" -> "webp" to "image/webp"
             else -> "jpg" to "image/jpeg"

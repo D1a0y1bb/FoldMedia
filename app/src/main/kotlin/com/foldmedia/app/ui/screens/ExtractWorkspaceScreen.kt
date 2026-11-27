@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,9 +29,11 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
@@ -96,6 +99,7 @@ fun ExtractWorkspaceScreen(
     onApplyClipboardBanner: () -> Unit,
     onDismissClipboardBanner: () -> Unit,
     onExtract: () -> Unit,
+    onCancelExtract: () -> Unit,
     onSelectHistoryPost: (ExtractedPost) -> Unit,
     onToggleItem: (String) -> Unit,
     onSelectAll: () -> Unit,
@@ -115,6 +119,7 @@ fun ExtractWorkspaceScreen(
             onUrlChange = onUrlChange,
             onPasteFromClipboard = onPasteFromClipboard,
             onExtract = onExtract,
+            onCancelExtract = onCancelExtract,
             onToggleItem = onToggleItem,
             onSelectAll = onSelectAll,
             onSelectOnlyLive = onSelectOnlyLive,
@@ -131,6 +136,7 @@ fun ExtractWorkspaceScreen(
             onApplyClipboardBanner = onApplyClipboardBanner,
             onDismissClipboardBanner = onDismissClipboardBanner,
             onExtract = onExtract,
+            onCancelExtract = onCancelExtract,
             onSelectHistoryPost = onSelectHistoryPost,
             onToggleItem = onToggleItem,
             onSelectAll = onSelectAll,
@@ -152,6 +158,7 @@ fun ExtractWorkspaceScreen(
             onApplyClipboardBanner = onApplyClipboardBanner,
             onDismissClipboardBanner = onDismissClipboardBanner,
             onExtract = onExtract,
+            onCancelExtract = onCancelExtract,
             onToggleItem = onToggleItem,
             onSelectAll = onSelectAll,
             onSelectOnlyLive = onSelectOnlyLive,
@@ -175,6 +182,7 @@ private fun CoverCompactLayout(
     onApplyClipboardBanner: () -> Unit,
     onDismissClipboardBanner: () -> Unit,
     onExtract: () -> Unit,
+    onCancelExtract: () -> Unit,
     onToggleItem: (String) -> Unit,
     onSelectAll: () -> Unit,
     onSelectOnlyLive: () -> Unit,
@@ -208,7 +216,8 @@ private fun CoverCompactLayout(
                 uiState = uiState,
                 onUrlChange = onUrlChange,
                 onPasteFromClipboard = onPasteFromClipboard,
-                onExtract = onExtract
+                onExtract = onExtract,
+                onCancelExtract = onCancelExtract
             )
         }
 
@@ -265,6 +274,7 @@ private fun DualPaneInnerLayout(
     onApplyClipboardBanner: () -> Unit,
     onDismissClipboardBanner: () -> Unit,
     onExtract: () -> Unit,
+    onCancelExtract: () -> Unit,
     onSelectHistoryPost: (ExtractedPost) -> Unit,
     onToggleItem: (String) -> Unit,
     onSelectAll: () -> Unit,
@@ -277,12 +287,77 @@ private fun DualPaneInnerLayout(
     onDownloadSelected: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val post = uiState.currentPost
+    if (post == null) {
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
+                .padding(top = 6.dp, bottom = 104.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(IntrinsicSize.Max)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(foldMetrics.leftPaneWeight)
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (!uiState.clipboardBannerUrl.isNullOrBlank()) {
+                        ClipboardBannerCard(
+                            text = uiState.clipboardBannerUrl,
+                            onExtract = onApplyClipboardBanner,
+                            onDismiss = onDismissClipboardBanner
+                        )
+                    }
+                    LinkInputCard(
+                        uiState = uiState,
+                        onUrlChange = onUrlChange,
+                        onPasteFromClipboard = onPasteFromClipboard,
+                        onExtract = onExtract,
+                        onCancelExtract = onCancelExtract
+                    )
+                    if (uiState.historyPosts.isNotEmpty()) {
+                        RecentHistoryCard(
+                            historyPosts = uiState.historyPosts,
+                            currentPost = null,
+                            onSelectHistoryPost = onSelectHistoryPost,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                        )
+                    } else {
+                        QuickWorkflowHintCard(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                        )
+                    }
+                }
+
+                // Hinge Safe Area Spacer for Xiaomi 18 Fold
+                Spacer(modifier = Modifier.width(foldMetrics.hingeSpacerDp))
+
+                SupportedPlatformsGuideCard(
+                    modifier = Modifier
+                        .weight(foldMetrics.rightPaneWeight)
+                        .fillMaxHeight()
+                )
+            }
+        }
+        return
+    }
+
     Row(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp)
     ) {
-        // Left Pane: Input & Recent History List (or quick share tip)
+        // Left Pane: Input & Recent History List
         LazyColumn(
             modifier = Modifier
                 .weight(foldMetrics.leftPaneWeight)
@@ -305,102 +380,19 @@ private fun DualPaneInnerLayout(
                     uiState = uiState,
                     onUrlChange = onUrlChange,
                     onPasteFromClipboard = onPasteFromClipboard,
-                    onExtract = onExtract
+                    onExtract = onExtract,
+                    onCancelExtract = onCancelExtract
                 )
             }
 
             if (uiState.historyPosts.isNotEmpty()) {
                 item {
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 2.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "最近提取",
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 15.sp
-                                )
-                                Text(
-                                    text = "${uiState.historyPosts.size} 条",
-                                    fontSize = 12.sp,
-                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary
-                                )
-                            }
-                            uiState.historyPosts.forEach { historyPost ->
-                                val current = uiState.currentPost
-                                val isCurrent = current != null &&
-                                    historyPost.id == current.id &&
-                                    historyPost.platform == current.platform
-                                val coverThumb = historyPost.items.firstOrNull()?.imageUrl
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(
-                                            if (isCurrent) FoldColors.HyperBlue.copy(alpha = 0.08f)
-                                            else MiuixTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f)
-                                        )
-                                        .clickable { onSelectHistoryPost(historyPost) }
-                                        .padding(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(42.dp)
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(MiuixTheme.colorScheme.secondaryContainer),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (!coverThumb.isNullOrBlank()) {
-                                            AsyncImage(
-                                                model = coverThumb,
-                                                contentDescription = historyPost.title,
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier.fillMaxSize()
-                                            )
-                                        } else {
-                                            PlatformBadgePill(platform = historyPost.platform)
-                                        }
-                                    }
-                                    Column(
-                                        modifier = Modifier.weight(1f),
-                                        verticalArrangement = Arrangement.spacedBy(3.dp)
-                                    ) {
-                                        Text(
-                                            text = historyPost.title,
-                                            fontSize = 13.sp,
-                                            fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Medium,
-                                            color = if (isCurrent) FoldColors.HyperBlue else MiuixTheme.colorScheme.onSurface,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = "${historyPost.platform.shortBadge} · ${historyPost.items.size} 项媒体",
-                                            fontSize = 11.sp,
-                                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary
-                                        )
-                                    }
-                                    if (isCurrent) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(7.dp)
-                                                .clip(CircleShape)
-                                                .background(FoldColors.HyperBlue)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    RecentHistoryCard(
+                        historyPosts = uiState.historyPosts,
+                        currentPost = post,
+                        onSelectHistoryPost = onSelectHistoryPost,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             } else {
                 item {
@@ -418,51 +410,44 @@ private fun DualPaneInnerLayout(
                 .weight(foldMetrics.rightPaneWeight)
                 .fillMaxHeight()
         ) {
-            val post = uiState.currentPost
-            if (post == null) {
-                Box(modifier = Modifier.padding(top = 6.dp)) {
-                    SupportedPlatformsGuideCard(modifier = Modifier.fillMaxWidth())
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(foldMetrics.gridColumnCount),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(top = 6.dp, bottom = 104.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                    PostSummaryAndToolbarCard(
+                        post = post,
+                        livePhotoSaveMode = uiState.livePhotoSaveMode,
+                        onChangeLiveMode = onChangeLiveMode,
+                        onSelectAll = onSelectAll,
+                        onSelectOnlyLive = onSelectOnlyLive,
+                        onSelectOnlyImages = onSelectOnlyImages,
+                        onClearSelection = onClearSelection,
+                        onSelectQuality = onSelectQuality,
+                        onDownloadSelected = onDownloadSelected
+                    )
                 }
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(foldMetrics.gridColumnCount),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(top = 6.dp, bottom = 104.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
+                if (post.items.size == 1) {
                     item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
-                        PostSummaryAndToolbarCard(
-                            post = post,
-                            livePhotoSaveMode = uiState.livePhotoSaveMode,
-                            onChangeLiveMode = onChangeLiveMode,
-                            onSelectAll = onSelectAll,
-                            onSelectOnlyLive = onSelectOnlyLive,
-                            onSelectOnlyImages = onSelectOnlyImages,
-                            onClearSelection = onClearSelection,
-                            onSelectQuality = onSelectQuality,
-                            onDownloadSelected = onDownloadSelected
+                        val singleItem = post.items.first()
+                        MediaGridTile(
+                            item = singleItem,
+                            isSingleFullCard = true,
+                            onToggle = { onToggleItem(singleItem.id) },
+                            onPreview = { onOpenPreview(singleItem) }
                         )
                     }
-                    if (post.items.size == 1) {
-                        item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
-                            val singleItem = post.items.first()
-                            MediaGridTile(
-                                item = singleItem,
-                                isSingleFullCard = true,
-                                onToggle = { onToggleItem(singleItem.id) },
-                                onPreview = { onOpenPreview(singleItem) }
-                            )
-                        }
-                    } else {
-                        items(post.items, key = { it.id }) { item ->
-                            MediaGridTile(
-                                item = item,
-                                isSingleFullCard = false,
-                                onToggle = { onToggleItem(item.id) },
-                                onPreview = { onOpenPreview(item) }
-                            )
-                        }
+                } else {
+                    items(post.items, key = { it.id }) { item ->
+                        MediaGridTile(
+                            item = item,
+                            isSingleFullCard = false,
+                            onToggle = { onToggleItem(item.id) },
+                            onPreview = { onOpenPreview(item) }
+                        )
                     }
                 }
             }
@@ -477,6 +462,7 @@ private fun TabletopExtractLayout(
     onUrlChange: (String) -> Unit,
     onPasteFromClipboard: () -> Unit,
     onExtract: () -> Unit,
+    onCancelExtract: () -> Unit,
     onToggleItem: (String) -> Unit,
     onSelectAll: () -> Unit,
     onSelectOnlyLive: () -> Unit,
@@ -527,6 +513,7 @@ private fun TabletopExtractLayout(
                 onUrlChange = onUrlChange,
                 onPasteFromClipboard = onPasteFromClipboard,
                 onExtract = onExtract,
+                onCancelExtract = onCancelExtract,
                 compact = true
             )
 
@@ -577,6 +564,7 @@ private fun LinkInputCard(
     onUrlChange: (String) -> Unit,
     onPasteFromClipboard: () -> Unit,
     onExtract: () -> Unit,
+    onCancelExtract: () -> Unit,
     compact: Boolean = false
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -653,7 +641,7 @@ private fun LinkInputCard(
                         Box {
                             if (uiState.urlInput.isEmpty()) {
                                 Text(
-                                    text = "粘贴抖音 / 小红书分享文案、X 或 YouTube 链接",
+                                    text = "粘贴抖音 / 小红书 / 微信公众号贴图 / X / YouTube 链接",
                                     fontSize = 14.sp,
                                     lineHeight = 20.sp,
                                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary
@@ -685,29 +673,68 @@ private fun LinkInputCard(
                 )
             }
 
-            Button(
-                onClick = onExtract,
-                enabled = !uiState.isExtracting,
-                colors = ButtonDefaults.buttonColorsPrimary(),
-                modifier = Modifier.fillMaxWidth()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                Button(
+                    onClick = onExtract,
+                    enabled = !uiState.isExtracting,
+                    minHeight = 48.dp,
+                    insideMargin = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                ) {
+                    if (uiState.isExtracting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = MiuixTheme.colorScheme.onPrimary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = uiState.extractStageText,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MiuixTheme.colorScheme.onPrimary
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.AutoAwesome,
+                            contentDescription = null,
+                            tint = MiuixTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(17.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "立即提取视频 / 原图 / 实况",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            color = MiuixTheme.colorScheme.onPrimary
+                        )
+                    }
+                }
                 if (uiState.isExtracting) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = MiuixTheme.colorScheme.onPrimary
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("本地引擎解析中...", color = MiuixTheme.colorScheme.onPrimary)
-                } else {
-                    Icon(
-                        imageVector = Icons.Rounded.AutoAwesome,
-                        contentDescription = null,
-                        tint = MiuixTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(17.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("立即提取视频 / 原图 / 实况", color = MiuixTheme.colorScheme.onPrimary)
+                    Button(
+                        onClick = onCancelExtract,
+                        minWidth = 0.dp,
+                        minHeight = 48.dp,
+                        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
+                        modifier = Modifier.height(48.dp)
+                    ) {
+                        Text(
+                            text = "取消",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1
+                        )
+                    }
                 }
             }
         }
@@ -1078,23 +1105,141 @@ private fun MediaGridTile(
 }
 
 @Composable
-private fun QuickWorkflowHintCard() {
-    Card(modifier = Modifier.fillMaxWidth()) {
+private fun RecentHistoryCard(
+    historyPosts: List<ExtractedPost>,
+    currentPost: ExtractedPost?,
+    onSelectHistoryPost: (ExtractedPost) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(modifier = modifier) {
         Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                text = "快捷导入方式",
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 14.sp
-            )
-            Text(
-                text = "在抖音、小红书、X 或 YouTube 内点击「分享 -> 叠影提取」，或直接复制链接后回到本页即可自动识别。",
-                fontSize = 12.sp,
-                lineHeight = 18.sp,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "最近提取",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 15.sp
+                )
+                Text(
+                    text = "${historyPosts.size} 条",
+                    fontSize = 12.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+                )
+            }
+            historyPosts.forEach { historyPost ->
+                val isCurrent = currentPost != null &&
+                    historyPost.id == currentPost.id &&
+                    historyPost.platform == currentPost.platform
+                val coverThumb = historyPost.items.firstOrNull()?.imageUrl
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            if (isCurrent) FoldColors.HyperBlue.copy(alpha = 0.08f)
+                            else MiuixTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f)
+                        )
+                        .clickable { onSelectHistoryPost(historyPost) }
+                        .padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MiuixTheme.colorScheme.secondaryContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (!coverThumb.isNullOrBlank()) {
+                            AsyncImage(
+                                model = coverThumb,
+                                contentDescription = historyPost.title,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            PlatformBadgePill(platform = historyPost.platform)
+                        }
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Text(
+                            text = historyPost.title,
+                            fontSize = 13.sp,
+                            fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Medium,
+                            color = if (isCurrent) FoldColors.HyperBlue else MiuixTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "${historyPost.platform.shortBadge} · ${historyPost.items.size} 项媒体",
+                            fontSize = 11.sp,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+                        )
+                    }
+                    if (isCurrent) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(FoldColors.HyperBlue)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickWorkflowHintCard(modifier: Modifier = Modifier) {
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "快捷导入方式",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp
+                )
+                Text(
+                    text = "在抖音、小红书、微信（公众号/表情专辑）、X 或 YouTube 内点击「分享 -> 叠影提取」，或直接复制链接后回到本页即可自动识别。",
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MiuixTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f))
+                    .padding(horizontal = 10.dp, vertical = 7.dp)
+            ) {
+                Text(
+                    text = "纯本地解析与音视频合成 · 不经过任何第三方中转服务器",
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+                )
+            }
         }
     }
 }
@@ -1167,51 +1312,85 @@ private fun ClipboardBannerCard(
     }
 }
 
+private data class GuideTileSpec(
+    val platform: PlatformType?,
+    val badgeText: String,
+    val badgeColor: Color,
+    val subtitle: String,
+    val detail: String
+)
+
 @Composable
 private fun SupportedPlatformsGuideCard(modifier: Modifier = Modifier) {
-    val platformCards = listOf(
-        Triple(PlatformType.DOUYIN, "无水印视频 · 图集 · 实况", "自动清洗分享口令，识别图集内嵌实况视频流"),
-        Triple(PlatformType.XIAOHONGSHU, "无水印原图 · 小米实况", "本地提取高清原图并合成 MVIMG 动态照片"),
-        Triple(PlatformType.X_TWITTER, "多图原图 · 高清视频", "自动请求 name=orig 无压缩原图与最高码率 MP4"),
-        Triple(PlatformType.YOUTUBE, "4K / 1080P · 纯音频", "内置 yt-dlp + FFmpeg + Aria2c 本地混流导出")
+    val guideTiles = listOf(
+        GuideTileSpec(PlatformType.DOUYIN, PlatformType.DOUYIN.shortBadge, PlatformType.DOUYIN.accentColor, "无水印视频 · 实况图", "清洗口令并识别内嵌实况视频流"),
+        GuideTileSpec(PlatformType.XIAOHONGSHU, PlatformType.XIAOHONGSHU.shortBadge, PlatformType.XIAOHONGSHU.accentColor, "无水印原图 · 小米实况", "本地提取原图合成 MVIMG 照片"),
+        GuideTileSpec(PlatformType.X_TWITTER, PlatformType.X_TWITTER.shortBadge, PlatformType.X_TWITTER.accentColor, "原图 · HLS 混流 MP4", "Fx/Vx 镜像直连，自动合并音视频"),
+        GuideTileSpec(PlatformType.YOUTUBE, PlatformType.YOUTUBE.shortBadge, PlatformType.YOUTUBE.accentColor, "4K / 1080P · 纯音频", "内置 yt-dlp + FFmpeg 本地导出"),
+        GuideTileSpec(PlatformType.WECHAT, PlatformType.WECHAT.shortBadge, PlatformType.WECHAT.accentColor, "公众号原图 · 表情贴图", "自动提取高清配图与动态贴图 GIF"),
+        GuideTileSpec(null, "本地", FoldColors.HyperBlue, "全本地隐私 · 直存相册", "Cookie 仅存本机，原图视频直存相册")
     )
 
     Card(modifier = modifier) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
                 text = "支持平台与本地提取能力",
                 fontWeight = FontWeight.Bold,
                 fontSize = 15.sp
             )
-            platformCards.chunked(2).forEach { row ->
+            guideTiles.chunked(2).forEach { row ->
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Max),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    row.forEach { (platform, subtitle, detail) ->
+                    row.forEach { tile ->
                         Column(
                             modifier = Modifier
                                 .weight(1f)
+                                .fillMaxHeight()
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(MiuixTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f))
                                 .padding(12.dp),
                             verticalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
-                            PlatformBadgePill(platform = platform)
+                            if (tile.platform != null) {
+                                PlatformBadgePill(platform = tile.platform)
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(tile.badgeColor.copy(alpha = 0.16f))
+                                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                                ) {
+                                    Text(
+                                        text = tile.badgeText,
+                                        color = tile.badgeColor,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                             Text(
-                                text = subtitle,
+                                text = tile.subtitle,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = detail,
+                                text = tile.detail,
                                 fontSize = 11.sp,
                                 lineHeight = 16.sp,
+                                minLines = 2,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
                                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary
                             )
                         }

@@ -104,6 +104,7 @@ class MainActivity : ComponentActivity() {
                             onApplyClipboardBanner = viewModel::applyClipboardAndExtract,
                             onDismissClipboardBanner = viewModel::dismissClipboardBanner,
                             onExtract = viewModel::extractCurrentUrl,
+                            onCancelExtract = viewModel::cancelExtraction,
                             onSelectHistoryPost = viewModel::selectHistoryPost,
                             onToggleItem = viewModel::toggleItemSelection,
                             onSelectAll = viewModel::selectAllItems,

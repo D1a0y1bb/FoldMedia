@@ -463,12 +463,12 @@ private fun UnifiedSettingsCard(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
-                        text = "本地解析内核 (yt-dlp + FFmpeg + Aria2c)",
+                        text = "本地解析内核 (yt-dlp + FFmpeg)",
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 13.sp
                     )
                     Text(
-                        text = "版本: ${ytDlpStatus.version} · FFmpeg ${if (ytDlpStatus.ffmpegReady) "✓" else "×"} · Aria2c ${if (ytDlpStatus.aria2cReady) "✓" else "×"}",
+                        text = "版本: ${ytDlpStatus.version} · FFmpeg ${if (ytDlpStatus.ffmpegReady) "✓" else "×"}",
                         fontSize = 11.sp,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary
                     )
